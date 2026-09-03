@@ -1,6 +1,7 @@
 import { callModel, estimateCost } from '../providers/client.js';
 import { TOOL_DEFS, WRITE_TOOLS, runTool } from './tools.js';
 import { Stage, buildCommitMessage } from './stage.js';
+import { isProtectedBranch, describeCommitRequest } from './guard.js';
 import * as gh from '../github.js';
 import { addUsage, getSettings, getRepo, getBudget, getUsage } from '../storage.js';
 
@@ -40,7 +41,7 @@ function filterTools(agent) {
   return TOOL_DEFS.filter(t => allowed.has(t.name));
 }
 
-export async function runAgent({ provider, model, agent, userMessage, history, onEvent }) {
+export async function runAgent({ provider, model, agent, userMessage, history, onEvent, onApproval }) {
   const settings = await getSettings();
   const budget = await getBudget();
   const repo = await getRepo();
@@ -71,8 +72,11 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
     repo,
     stage,
     treeCache: new Map(),
+    settings,
     onFileChange: (info) => onEvent?.({ type: 'file_change', ...info }),
     flush: (reason) => flushStage(reason),
+    // Usado por delete_file: remoção é a ação mais cara de desfazer pelo painel.
+    requestApproval: typeof onApproval === 'function' ? onApproval : null,
   };
 
   function track(usage, cost) {
@@ -102,7 +106,34 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
         ? { path: e.path, action: 'delete' }
         : { path: e.path, content: e.content });
 
+      // Portão de branch protegida: nada é escrito sem "ok" do usuário. O
+      // agente não consegue rodar build/teste no browser, então essa é a única
+      // barreira antes de código não verificado entrar em main.
+      if (settings.confirmProtectedCommit !== false
+          && isProtectedBranch(branch, settings.protectedBranches)
+          && typeof onApproval === 'function') {
+        const ok = await onApproval({
+          kind: 'commit',
+          branch,
+          reason,
+          files: entries.map(e => ({ path: e.path, action: e.action })),
+          summary: describeCommitRequest({ branch, files: entries }),
+        });
+        if (!ok) {
+          // Staging preservado: o usuário pode redirecionar para outra branch
+          // ou aprovar depois com "commita agora".
+          onEvent?.({
+            type: 'commit_denied',
+            branch,
+            count: files.length,
+            files: entries.map(e => e.path),
+          });
+          continue;
+        }
+      }
+
       onEvent?.({ type: 'commit_start', branch, count: files.length, reason });
+
       try {
         const res = await gh.createCommit(owner, repoName, branch, files, buildCommitMessage(entries));
         stage.clear(entries.map(e => e.path));

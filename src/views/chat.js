@@ -50,6 +50,49 @@ function chatHeader(agent) {
   ]);
 }
 
+// Pedido de aprovação humana: renderiza um card com Aprovar / Recusar e resolve
+// a Promise no clique. O loop do agente fica bloqueado esperando essa resposta,
+// então o botão é a única saída — sem timeout, para não commitar por descuido.
+function askApproval(msgsBox, req) {
+  return new Promise((resolve) => {
+    const isDelete = req.kind === 'delete';
+
+    const fileList = el('ul', { class: 'approval-files' },
+      (req.files || []).map(f => el('li', {}, `${f.action === 'delete' ? '🗑' : '±'} ${f.path}`)));
+
+    const approveBtn = el('button', { class: 'btn btn-primary btn-sm' },
+      isDelete ? 'Apagar' : 'Aprovar e commitar');
+    const denyBtn = el('button', { class: 'btn btn-ghost-danger btn-sm' }, 'Recusar');
+
+    const card = el('div', { class: 'msg tool approval' }, [
+      el('div', { class: 'role' }, isDelete ? '⚠ confirmar remoção' : '⚠ branch protegida'),
+      el('div', { class: 'approval-body' }, [
+        el('p', {}, isDelete
+          ? `O agente quer apagar um arquivo de ${req.branch}. Isso sai do HEAD e só volta pelo histórico do GitHub.`
+          : `O agente quer commitar ${req.summary}. Nada foi verificado por build ou teste.`),
+        fileList,
+      ]),
+      el('div', { class: 'approval-actions' }, [denyBtn, approveBtn]),
+    ]);
+
+    function settle(ok) {
+      approveBtn.disabled = true;
+      denyBtn.disabled = true;
+      card.classList.add(ok ? 'approved' : 'denied');
+      card.querySelector('.approval-actions').replaceChildren(
+        el('span', { class: 'field-hint' }, ok ? '✓ aprovado' : '✗ recusado'),
+      );
+      resolve(ok);
+    }
+
+    approveBtn.addEventListener('click', () => settle(true));
+    denyBtn.addEventListener('click', () => settle(false));
+
+    msgsBox.appendChild(card);
+    msgsBox.scrollTop = msgsBox.scrollHeight;
+  });
+}
+
 function emptyView(icon, title, text) {
   return el('div', { class: 'empty-card' }, [
     el('div', { class: 'empty-icon-wrap' }, icon),
@@ -166,6 +209,7 @@ export async function renderChat(view) {
         provider, model, agent,
         userMessage: text,
         history,
+        onApproval: (req) => askApproval(msgsBox, req),
         onEvent: (ev) => {
           if (ev.type === 'thinking') {
             assistantNode.className = 'thinking';

@@ -1,4 +1,5 @@
 import { getProviderType } from './providers/catalog.js';
+import { DEFAULT_PROTECTED_BRANCHES } from './agent/guard.js';
 
 const KEYS = {
   providers: 'tom.providers',
@@ -239,6 +240,12 @@ export async function getSettings() {
     systemPrompt: '',
     autoCommit: true,
     autoReview: true,
+    // Portões de aprovação humana. Ligados por padrão: o agente não tem como
+    // rodar build/teste no browser, então commit em branch protegida e remoção
+    // de arquivo passam pelo usuário.
+    confirmProtectedCommit: true,
+    confirmDelete: true,
+    protectedBranches: DEFAULT_PROTECTED_BRANCHES.join(', '),
     ...cur,
   };
 }

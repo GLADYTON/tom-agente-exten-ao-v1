@@ -255,6 +255,28 @@ export async function runTool(name, args, ctx = {}) {
     if (f.isDir) throw new Error(`${p} é um diretório, não um arquivo.`);
     if (!f.existed) throw new Error(`${p} não existe.`);
 
+    // Remoção é a ação mais difícil de desfazer pelo painel: o conteúdo sai do
+    // HEAD e o usuário precisaria ir ao histórico do GitHub para recuperar.
+    // Arquivo criado neste mesmo turno não conta — descartar isso é inofensivo.
+    const createdThisTurn = stage.known(p)?.staged && !stage.files.get(p)?.existed;
+    if (ctx.settings?.confirmDelete !== false && ctx.requestApproval && !createdThisTurn) {
+      const ok = await ctx.requestApproval({
+        kind: 'delete',
+        branch: target,
+        files: [{ path: p, action: 'delete' }],
+        lines: (f.text || '').split('\n').length,
+        summary: `apagar ${p} (${target})`,
+      });
+      if (!ok) {
+        return {
+          staged: false,
+          path: p,
+          denied: true,
+          note: 'O usuário não autorizou apagar este arquivo. Não tente de novo sem que ele peça; siga com o resto da tarefa.',
+        };
+      }
+    }
+
     const entry = stage.stageDelete(p, {
       message: args.message,
       branch: target,
