@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Agente Tom",
+  "version": "1.2.0",
+  "description": "Agentes de IA que editam seus repositórios do GitHub com os modelos que você configurar.",
+  "permissions": ["storage", "sidePanel"],
+  "host_permissions": [
+    "https://gtw.cloud2.dgsis.com.br/*",
+    "https://api.github.com/*",
+    "https://github.com/*",
+    "https://models.github.ai/*",
+    "https://models.inference.ai.azure.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*",
+    "https://openrouter.ai/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.groq.com/*",
+    "https://api.cerebras.ai/*",
+    "https://api.together.xyz/*",
+    "https://router.huggingface.co/*",
+    "https://api-inference.huggingface.co/*",
+    "https://api.deepseek.com/*",
+    "https://api.mistral.ai/*",
+    "https://api.x.ai/*",
+    "https://api.fireworks.ai/*",
+    "https://api.perplexity.ai/*",
+    "https://api.sambanova.ai/*",
+    "https://api.novita.ai/*",
+    "https://api.studio.nebius.com/*",
+    "https://api.studio.nebius.ai/*",
+    "https://api.cohere.com/*",
+    "https://api.cohere.ai/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": ["*://*/*"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "panel.html" },
+  "action": {
+    "default_title": "Agente Tom"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src *"
+  }
+}
