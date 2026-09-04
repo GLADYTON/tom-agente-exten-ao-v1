@@ -1,8 +1,9 @@
 import { el, clear, renderInlineMd, fmtCost, fmtTokens } from '../util/dom.js';
-import { getProviders, getActiveModel, getRepo, getChats, saveChats, getActiveAgent } from '../storage.js';
+import { getProviders, getActiveModel, getRepo, getChats, saveChats, getActiveAgent, getActiveChatId, setActiveChatId } from '../storage.js';
 import { runAgent } from '../agent/loop.js';
 
 let history = [];
+let currentChatId = null;
 
 function bubble(role, contentNode) {
   return el('div', { class: `msg ${role}` }, [
@@ -145,8 +146,22 @@ export async function renderChat(view) {
   const msgsBox = el('div', { class: 'chat-messages-scroll' });
   shell.appendChild(msgsBox);
 
-  const priorChats = await getChats();
-  history = priorChats[0]?.messages || [];
+  const allChats = await getChats();
+  currentChatId = await getActiveChatId();
+  
+  let activeChat = null;
+  if (currentChatId) {
+    activeChat = allChats.find(c => c.id === currentChatId);
+  }
+  
+  if (!activeChat) {
+    currentChatId = `chat_${Date.now()}`;
+    activeChat = { id: currentChatId, title: 'Nova Conversa', updatedAt: new Date().toISOString(), messages: [] };
+    await setActiveChatId(currentChatId);
+    // Não salva no array ainda, só quando tiver a primeira mensagem
+  }
+
+  history = activeChat.messages || [];
 
   if (!history.length) {
     msgsBox.appendChild(el('div', { class: 'welcome-box' }, [
@@ -181,10 +196,29 @@ export async function renderChat(view) {
   ]);
   shell.appendChild(inputArea);
 
+  async function saveCurrentChat() {
+    const allChats = await getChats();
+    const idx = allChats.findIndex(c => c.id === currentChatId);
+    
+    const chatObj = {
+      id: currentChatId,
+      title: history.find(m => m.role === 'user')?.content?.slice(0, 40) || 'Nova Conversa',
+      updatedAt: new Date().toISOString(),
+      messages: history
+    };
+
+    if (idx >= 0) {
+      allChats[idx] = chatObj;
+    } else {
+      allChats.unshift(chatObj); // Adiciona no topo
+    }
+    await saveChats(allChats);
+  }
+
   clearBtn.addEventListener('click', async () => {
     if (!confirm('Limpar o histórico desta conversa?')) return;
     history = [];
-    await saveChats([{ messages: [] }]);
+    await saveCurrentChat();
     renderChat(view);
   });
 
