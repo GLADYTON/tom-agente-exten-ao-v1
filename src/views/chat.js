@@ -204,6 +204,42 @@ export async function renderChat(view) {
     const assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
     msgsBox.appendChild(bubble('assistant', assistantNode));
 
+    // Agrupador de ferramentas do turno atual
+    let currentToolGroup = null;
+    let toolStats = { read: 0, write: 0, err: 0 };
+
+    function getOrCreateToolGroup() {
+      if (currentToolGroup) return currentToolGroup;
+      
+      const summaryText = el('span', { class: 'tool-summary-text' }, 'Trabalhando nos arquivos...');
+      const toggleBtn = el('button', { class: 'tool-group-toggle' }, 'Ver detalhes');
+      const header = el('div', { class: 'tool-group-header' }, [summaryText, toggleBtn]);
+      const details = el('div', { class: 'tool-group-details', style: 'display: none;' });
+      
+      currentToolGroup = {
+        node: el('div', { class: 'msg tool-group' }, [header, details]),
+        details,
+        summaryText,
+        updateSummary: () => {
+          const parts = [];
+          if (toolStats.read) parts.push(`${toolStats.read} lido${toolStats.read > 1 ? 's' : ''}`);
+          if (toolStats.write) parts.push(`${toolStats.write} editado${toolStats.write > 1 ? 's' : ''}`);
+          if (toolStats.err) parts.push(`${toolStats.err} erro${toolStats.err > 1 ? 's' : ''}`);
+          summaryText.textContent = parts.length ? parts.join(', ') : 'Trabalhando...';
+          if (toolStats.err) summaryText.classList.add('has-error');
+        }
+      };
+
+      toggleBtn.addEventListener('click', () => {
+        const isHidden = details.style.display === 'none';
+        details.style.display = isHidden ? 'flex' : 'none';
+        toggleBtn.textContent = isHidden ? 'Ocultar detalhes' : 'Ver detalhes';
+      });
+
+      msgsBox.insertBefore(currentToolGroup.node, assistantNode.parentElement);
+      return currentToolGroup;
+    }
+
     try {
       const out = await runAgent({
         provider, model, agent,
@@ -214,22 +250,34 @@ export async function renderChat(view) {
           if (ev.type === 'thinking') {
             assistantNode.className = 'thinking';
             assistantNode.innerHTML = thinkingHtml;
+            // Reseta o grupo a cada iteração do loop para não misturar turnos
+            currentToolGroup = null;
+            toolStats = { read: 0, write: 0, err: 0 };
           } else if (ev.type === 'assistant_text' && ev.text) {
             assistantNode.className = '';
             assistantNode.innerHTML = renderInlineMd(ev.text);
           } else if (ev.type === 'tool_call') {
-            msgsBox.appendChild(el('div', { class: 'msg tool' }, [
-              el('div', { class: 'role' }, `→ ${ev.name}`),
+            const group = getOrCreateToolGroup();
+            if (ev.name.includes('read') || ev.name.includes('list')) toolStats.read++;
+            else toolStats.write++;
+            group.updateSummary();
+            
+            group.details.appendChild(el('div', { class: 'tool-item call' }, [
+              el('div', { class: 'tool-name' }, `→ ${ev.name}`),
               el('pre', {}, fmtArgs(ev.args)),
             ]));
           } else if (ev.type === 'tool_result') {
-            msgsBox.appendChild(el('div', { class: 'msg tool ok' }, [
-              el('div', { class: 'role' }, `✓ ${ev.name}`),
-              el('pre', {}, fmtArgs(ev.result).slice(0, 2000)),
+            const group = getOrCreateToolGroup();
+            group.details.appendChild(el('div', { class: 'tool-item ok' }, [
+              el('div', { class: 'tool-name' }, `✓ ${ev.name}`),
+              el('pre', {}, fmtArgs(ev.result).slice(0, 1000) + (JSON.stringify(ev.result).length > 1000 ? '...' : '')),
             ]));
           } else if (ev.type === 'tool_error') {
-            msgsBox.appendChild(el('div', { class: 'msg tool err' }, [
-              el('div', { class: 'role' }, `✗ ${ev.name}`),
+            const group = getOrCreateToolGroup();
+            toolStats.err++;
+            group.updateSummary();
+            group.details.appendChild(el('div', { class: 'tool-item err' }, [
+              el('div', { class: 'tool-name' }, `✗ ${ev.name}`),
               el('div', { class: 'error-banner-inline' }, ev.error),
             ]));
           } else if (ev.type === 'usage') {
