@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Agente Tom",
-  "version": "1.2.0",
-  "description": "Agentes de IA que editam seus repositórios do GitHub com os modelos que você configurar.",
+  "name": "CodeForge",
+  "version": "2.0.0",
+  "description": "CodeForge — Agentes de IA que editam, revisam e transformam seus repositórios GitHub com maestria.",
   "permissions": ["storage", "sidePanel"],
   "host_permissions": [
     "https://gtw.cloud2.dgsis.com.br/*",
@@ -37,7 +37,7 @@
   "background": { "service_worker": "background.js" },
   "side_panel": { "default_path": "panel.html" },
   "action": {
-    "default_title": "Agente Tom"
+    "default_title": "CodeForge"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src *"

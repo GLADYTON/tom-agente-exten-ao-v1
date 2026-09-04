@@ -1,19 +1,19 @@
 :root {
-  --bg: #0a0c11;
-  --surface: #111420;
-  --surface-2: #171b28;
-  --surface-3: #1e2432;
-  --border: #222836;
-  --border-2: #2d3547;
+  --bg: #080b12;
+  --surface: #0e1320;
+  --surface-2: #141b2b;
+  --surface-3: #1a2340;
+  --border: #1e2940;
+  --border-2: #2a3a5a;
 
-  --text: #e9edf5;
-  --text-dim: #98a3b8;
-  --text-mute: #626d80;
+  --text: #e2e8f0;
+  --text-dim: #8899bb;
+  --text-mute: #5a6d8a;
 
-  --accent: #6366f1;
-  --accent-2: #8b5cf6;
-  --accent-soft: rgba(99, 102, 241, 0.14);
-  --accent-line: rgba(99, 102, 241, 0.42);
+  --accent: #6c5ce7;
+  --accent-2: #a78bfa;
+  --accent-soft: rgba(108, 92, 231, 0.15);
+  --accent-line: rgba(108, 92, 231, 0.45);
 
   --ok: #34d399;
   --ok-soft: rgba(52, 211, 153, 0.12);
@@ -69,28 +69,27 @@ code { font-family: var(--mono); }
   gap: var(--s3);
   padding: 10px var(--s4);
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: linear-gradient(135deg, var(--surface) 0%, #0f1020 100%);
   flex-shrink: 0;
 }
 .brand-mark {
-  width: 28px; height: 28px;
+  width: 32px; height: 32px;
   border-radius: var(--r-sm);
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   display: flex; align-items: center; justify-content: center;
   color: #fff;
   flex-shrink: 0;
+  position: relative;
 }
-.brand-mark svg { width: 16px; height: 16px; }
-.brand-text { min-width: 0; flex: 1; }
-.brand-name { font-weight: 650; font-size: 13px; letter-spacing: -0.2px; color: #fff; }
-.brand-status {
-  font-size: 10.5px;
-  color: var(--text-mute);
-  font-family: var(--mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 1px;
+.brand-mark svg { width: 18px; height: 18px; }
+.brand-dot {
+  position: absolute;
+  bottom: -2px; right: -2px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
 }
 /* ============ TABS ============ */
 .app-tabs {
