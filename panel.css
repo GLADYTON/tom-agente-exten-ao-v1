@@ -730,6 +730,7 @@ code { font-family: var(--mono); }
   box-shadow: var(--shadow-1);
 }
 
+/* ============ HISTORY VIEW (COMMITS) ============ */
 .commits-list {
   display: flex;
   flex-direction: column;

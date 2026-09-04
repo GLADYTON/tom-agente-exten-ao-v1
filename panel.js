@@ -1,6 +1,7 @@
 import { renderChat } from './src/views/chat.js';
 import { renderGithub } from './src/views/github.js';
 import { renderRepos } from './src/views/repos.js';
+import { renderHistory } from './src/views/history.js';
 import { renderConfig } from './src/views/config.js';
 import { renderUsage } from './src/views/usage.js';
 import { renderAgentsPanel } from './src/views/agents.js';
@@ -10,6 +11,7 @@ const VIEWS = {
   chat: renderChat,
   github: renderGithub,
   repos: renderRepos,
+  history: renderHistory,
   config: renderConfig,
   usage: renderUsage,
 };
