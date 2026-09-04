@@ -2,21 +2,25 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Agente Tom</title>
+  <title>CodeForge</title>
   <link rel="stylesheet" href="panel.css">
 </head>
 <body>
   <!-- TOPBAR -->
   <header class="app-topbar">
     <div class="brand-mark">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M12 2L2 7l10 5 10-5-10-5z" stroke-linejoin="round"/>
-        <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke-linejoin="round"/>
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="2" y="2" width="12" height="12" rx="2" stroke-linejoin="round"/>
+        <rect x="18" y="2" width="12" height="12" rx="2" stroke-linejoin="round"/>
+        <rect x="2" y="18" width="12" height="12" rx="2" stroke-linejoin="round"/>
+        <rect x="18" y="18" width="12" height="12" rx="2" stroke-linejoin="round"/>
+        <path d="M8 8h16M8 24h16" stroke-linecap="round"/>
       </svg>
+      <div class="brand-dot"></div>
     </div>
     <div class="brand-text">
-      <div class="brand-name">Agente Tom</div>
-      <div class="brand-status" id="topbar-status">Carregando...</div>
+      <div class="brand-name">CodeForge</div>
+      <div class="brand-status" id="topbar-status">Inicializando...</div>
     </div>
   </header>
 
@@ -33,6 +37,10 @@
     <button class="app-tab" data-view="repos" role="tab">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
       <span>Repo</span>
+    </button>
+    <button class="app-tab" data-view="history" role="tab">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linejoin="round"/></svg>
+      <span>Histórico</span>
     </button>
     <button class="app-tab" data-view="config" role="tab">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>

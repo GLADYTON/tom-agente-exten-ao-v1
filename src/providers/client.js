@@ -479,10 +479,18 @@ async function readAnthropicSSE(res, onDelta) {
 
 // Falhas de borda (proxy cortando, 429, 5xx, rede) costumam passar na segunda
 // tentativa; erros de request (4xx de auth/payload) não, então não são repetidos.
-const TRANSIENT_RE = /\b(429|500|502|503|504)\b|conexão .*caiu|não enviou nenhum dado|failed to fetch|network|load failed/i;
+const TRANSIENT_RE = /\b(500|502|503|504)\b|conexão .*caiu|não enviou nenhum dado|failed to fetch|network|load failed/i;
+
+// Erros que indicam que o modelo/chave esgotou o limite e não adianta tentar de novo
+// na mesma hora (precisa de fallback para outro modelo).
+const QUOTA_RE = /\b(429|quota|insufficient_quota|rate_limit_exceeded|too many requests)\b/i;
 
 function isTransient(err) {
   return TRANSIENT_RE.test(err?.message || '');
+}
+
+export function isQuotaError(err) {
+  return QUOTA_RE.test(err?.message || '');
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

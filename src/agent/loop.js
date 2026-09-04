@@ -1,8 +1,9 @@
-import { callModel, estimateCost } from '../providers/client.js';
+import { callModel, estimateCost, isQuotaError } from '../providers/client.js';
 import { TOOL_DEFS, WRITE_TOOLS, runTool } from './tools.js';
 import { Stage, buildCommitMessage } from './stage.js';
+import { isProtectedBranch, describeCommitRequest } from './guard.js';
 import * as gh from '../github.js';
-import { addUsage, getSettings, getRepo, getBudget, getUsage } from '../storage.js';
+import { addUsage, getSettings, getRepo, getBudget, getUsage, getProviders } from '../storage.js';
 
 const DEFAULT_SYSTEM = `Você é um engenheiro de software autônomo que edita repositórios do GitHub do usuário.
 
@@ -40,13 +41,7 @@ function filterTools(agent) {
   return TOOL_DEFS.filter(t => allowed.has(t.name));
 }
 
-// `overrides`, `stage` e `signal` existem para o modo orquestrado (multi-agente):
-// vários agentes compartilham UM staging, ninguém commita sozinho e o supervisor
-// pode cancelar. Chamado sem eles, o comportamento é o de sempre.
-export async function runAgent({
-  provider, model, agent, userMessage, history, onEvent,
-  stage: externalStage = null, overrides = {}, signal = null,
-}) {
+export async function runAgent({ provider, model, agent, userMessage, history, onEvent, onApproval, stage: externalStage = null, overrides = {}, signal = null, }) {
   const settings = await getSettings();
   const budget = await getBudget();
   const repo = await getRepo();
@@ -83,8 +78,11 @@ export async function runAgent({
     stage,
     // Cache de árvore compartilhado evita cada agente refazer o mesmo list_repo_tree.
     treeCache: overrides.treeCache || new Map(),
+    settings,
     onFileChange: (info) => onEvent?.({ type: 'file_change', ...info }),
     flush: (reason) => flushStage(reason),
+    // Usado por delete_file: remoção é a ação mais cara de desfazer pelo painel.
+    requestApproval: typeof onApproval === 'function' ? onApproval : null,
   };
 
   function track(usage, cost) {
@@ -126,7 +124,34 @@ export async function runAgent({
         ? { path: e.path, action: 'delete' }
         : { path: e.path, content: e.content });
 
+      // Portão de branch protegida: nada é escrito sem "ok" do usuário. O
+      // agente não consegue rodar build/teste no browser, então essa é a única
+      // barreira antes de código não verificado entrar em main.
+      if (settings.confirmProtectedCommit !== false
+          && isProtectedBranch(branch, settings.protectedBranches)
+          && typeof onApproval === 'function') {
+        const ok = await onApproval({
+          kind: 'commit',
+          branch,
+          reason,
+          files: entries.map(e => ({ path: e.path, action: e.action })),
+          summary: describeCommitRequest({ branch, files: entries }),
+        });
+        if (!ok) {
+          // Staging preservado: o usuário pode redirecionar para outra branch
+          // ou aprovar depois com "commita agora".
+          onEvent?.({
+            type: 'commit_denied',
+            branch,
+            count: files.length,
+            files: entries.map(e => e.path),
+          });
+          continue;
+        }
+      }
+
       onEvent?.({ type: 'commit_start', branch, count: files.length, reason });
+
       try {
         const res = await gh.createCommit(owner, repoName, branch, files, buildCommitMessage(entries));
         stage.clear(entries.map(e => e.path));
@@ -177,20 +202,65 @@ export async function runAgent({
     onEvent?.({ type: 'thinking', iter: i });
 
     let result;
+    let currentProvider = provider;
+    let currentModel = model;
+    
     try {
       result = await callModel({
-        provider, model, messages, tools,
+        provider: currentProvider, model: currentModel, messages, tools,
         opts: { temperature, onDelta: relayDelta },
       });
     } catch (e) {
-      onEvent?.({ type: 'error', message: e.message });
-      stopReason = 'error';
-      break;
+      // Se for erro de cota e o fallback automático estiver ligado, tenta a fila.
+      if (isQuotaError(e) && settings.autoFallback && settings.fallbackQueue?.length) {
+        onEvent?.({ type: 'retry', message: `Limite atingido em ${currentModel.label || currentModel.id}. Tentando fallback automático...`, attempt: 1, of: 1 });
+        
+        const allProviders = await getProviders();
+        let fallbackSuccess = false;
+        
+        for (const fallbackRef of settings.fallbackQueue) {
+          const [pId, mId] = fallbackRef.split('::');
+          const fbProvider = allProviders.find(p => p.id === pId);
+          const fbModel = fbProvider?.models?.find(m => m.id === mId);
+          
+          if (!fbProvider || !fbModel) continue;
+          // Não tenta o mesmo modelo que acabou de falhar
+          if (fbProvider.id === currentProvider.id && fbModel.id === currentModel.id) continue;
+          
+          onEvent?.({ type: 'retry', message: `Fallback: tentando ${fbModel.label || fbModel.id}...`, attempt: 1, of: 1 });
+          
+          try {
+            result = await callModel({
+              provider: fbProvider, model: fbModel, messages, tools,
+              opts: { temperature, onDelta: relayDelta },
+            });
+            currentProvider = fbProvider;
+            currentModel = fbModel;
+            fallbackSuccess = true;
+            break; // Deu certo, sai do loop de fallback
+          } catch (fbErr) {
+            // Se o fallback também der erro de cota, tenta o próximo da fila.
+            if (isQuotaError(fbErr)) continue;
+            // Se for outro erro (ex: auth), aborta.
+            throw fbErr;
+          }
+        }
+        
+        if (!fallbackSuccess) {
+          onEvent?.({ type: 'error', message: `Todos os modelos de fallback falharam por limite de cota. Último erro: ${e.message}` });
+          stopReason = 'error';
+          break;
+        }
+      } else {
+        onEvent?.({ type: 'error', message: e.message });
+        stopReason = 'error';
+        break;
+      }
     }
 
-    const cost = estimateCost(model, result.usage);
+    const cost = estimateCost(currentModel, result.usage);
     track(result.usage, cost);
-    await addUsage(provider.id, model.id, result.usage.input, result.usage.output, cost);
+    await addUsage(currentProvider.id, currentModel.id, result.usage.input, result.usage.output, cost);
     onEvent?.({ type: 'usage', usage: result.usage, cost });
 
     if (result.text) onEvent?.({ type: 'assistant_text', text: result.text });

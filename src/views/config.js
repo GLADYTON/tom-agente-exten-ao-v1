@@ -799,6 +799,88 @@ export async function renderConfig(view) {
   ]));
   view.appendChild(modelCard);
 
+  // --- SEÇÃO 2.5: Fallback Automático
+  const fallbackCard = el('div', { class: 'config-card' });
+  fallbackCard.appendChild(el('div', { class: 'section-title-row' }, [
+    el('div', {}, [
+      el('span', { class: 'section-tag' }, 'Fallback Automático (Anti-Limite)'),
+      el('p', { class: 'section-sub-tag' }, 'Se o modelo principal atingir o limite de cota (429 Too Many Requests), o agente tentará automaticamente os modelos abaixo na ordem definida.'),
+    ]),
+  ]));
+
+  const fallbackToggleRow = el('div', { class: 'tool-row' + (settings.autoFallback ? ' is-on' : '') });
+  const fallbackCheck = el('input', { type: 'checkbox', class: 'tool-checkbox', checked: settings.autoFallback ? 'checked' : null });
+  fallbackToggleRow.appendChild(fallbackCheck);
+  fallbackToggleRow.appendChild(el('div', { class: 'tool-row-text' }, [
+    el('div', { class: 'tool-row-title' }, 'Ativar troca automática de modelo'),
+    el('div', { class: 'tool-row-desc' }, 'O agente não vai parar se a API recusar por falta de créditos ou limite de requisições.'),
+  ]));
+  
+  fallbackToggleRow.addEventListener('click', async (e) => {
+    if (e.target !== fallbackCheck) fallbackCheck.checked = !fallbackCheck.checked;
+    const isOn = fallbackCheck.checked;
+    fallbackToggleRow.className = 'tool-row' + (isOn ? ' is-on' : '');
+    await setSettings({ ...settings, autoFallback: isOn });
+  });
+  fallbackCard.appendChild(fallbackToggleRow);
+
+  const fallbackQueueBox = el('div', { class: 'form-group', style: { marginTop: '12px' } });
+  
+  function renderFallbackQueue() {
+    clear(fallbackQueueBox);
+    const queue = settings.fallbackQueue || [];
+    
+    if (!queue.length) {
+      fallbackQueueBox.appendChild(el('div', { class: 'empty-inline' }, 'Nenhum modelo na fila de fallback.'));
+    } else {
+      queue.forEach((ref, idx) => {
+        const [pId, mId] = ref.split('::');
+        const p = providers.find(x => x.id === pId);
+        const m = p?.models?.find(x => x.id === mId);
+        const label = p && m ? `${p.name || p.type} · ${m.label || m.id}` : `Modelo não encontrado (${ref})`;
+        
+        const row = el('div', { class: 'provider-row-v2', style: { padding: '6px 10px' } }, [
+          el('div', { class: 'step-num', style: { width: '18px', height: '18px', fontSize: '10px' } }, String(idx + 1)),
+          el('div', { class: 'provider-row-body' }, [
+            el('div', { class: 'provider-row-title', style: { fontSize: '11.5px' } }, label)
+          ]),
+          el('div', { class: 'provider-row-actions' }, [
+            el('button', { class: 'btn btn-ghost-danger btn-sm', onclick: async () => {
+              const newQ = [...queue];
+              newQ.splice(idx, 1);
+              settings.fallbackQueue = newQ;
+              await setSettings({ ...settings, fallbackQueue: newQ });
+              renderFallbackQueue();
+            }}, '✕')
+          ])
+        ]);
+        fallbackQueueBox.appendChild(row);
+      });
+    }
+
+    const addSel = el('select', { class: 'select-field', style: { marginTop: '8px' } });
+    addSel.appendChild(el('option', { value: '' }, '+ Adicionar modelo à fila...'));
+    for (const p of providers) {
+      for (const m of (p.models || [])) {
+        const val = `${p.id}::${m.id}`;
+        if (queue.includes(val)) continue; // Já está na fila
+        addSel.appendChild(el('option', { value: val }, `${p.name || p.type} · ${m.label || m.id}`));
+      }
+    }
+    addSel.addEventListener('change', async () => {
+      if (!addSel.value) return;
+      const newQ = [...queue, addSel.value];
+      settings.fallbackQueue = newQ;
+      await setSettings({ ...settings, fallbackQueue: newQ });
+      renderFallbackQueue();
+    });
+    fallbackQueueBox.appendChild(addSel);
+  }
+  
+  renderFallbackQueue();
+  fallbackCard.appendChild(fallbackQueueBox);
+  view.appendChild(fallbackCard);
+
   // --- SEÇÃO 3: Limites & Orçamento
   const budgetCard = el('div', { class: 'config-card' });
   budgetCard.appendChild(el('div', { class: 'section-title-row' }, [

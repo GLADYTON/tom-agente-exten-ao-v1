@@ -1,15 +1,17 @@
 import { el, clear, renderInlineMd, fmtCost, fmtTokens } from '../util/dom.js';
 import {
   getProviders, getActiveModel, getRepo, getChats, saveChats, getActiveAgent,
-  getSettings, setSettings,
+  getSettings, setSettings, getActiveChatId, setActiveChatId,
 } from '../storage.js';
 import { runAgent } from '../agent/loop.js';
 import { resolveModel } from '../agent/model.js';
 import { Orchestrator } from '../agent/orchestrator.js';
 import { EV } from '../agent/events.js';
 import { createRunView } from './runview.js';
+import { AgentRunner } from '../runner.js';
 
 let history = [];
+let currentChatId = null;
 
 function bubble(role, contentNode) {
   return el('div', { class: `msg ${role}` }, [
@@ -41,6 +43,19 @@ function chatHeader(agent, teamMode, onModeChange) {
   return el('div', { class: 'chat-top-header' }, [
     teamMode
       ? el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
+          el('span', { class: 'chat-agent-name' }, agent?.name || 'Agente'),
+          el('span', { class: 'chat-agent-mode' }, 'Equipe'),
+        ])
+      : el('div', { class: 'chat-agent-info' }, [
+          el('span', { class: 'chat-agent-name' }, agent?.name || 'Agente'),
+          el('span', { class: 'chat-agent-mode' }, 'Solo'),
+        ]),
+    modeToggle(teamMode, onModeChange),
+  ]);
+}
+  return el('div', { class: 'chat-top-header' }, [
+    teamMode
+      ? el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
         el('span', { class: 'chat-agent-emoji' }, '👥'),
         el('span', { class: 'chat-agent-name' }, 'Equipe'),
         el('span', { class: 'chat-agent-badge' }, '3 agentes'),
@@ -58,6 +73,44 @@ function chatHeader(agent, teamMode, onModeChange) {
       ]),
     ]),
   ]);
+}
+
+function askApproval(msgsBox, req, resolvePromise) {
+  const isDelete = req.kind === 'delete';
+
+  const fileList = el('ul', { class: 'approval-files' },
+    (req.files || []).map(f => el('li', {}, `${f.action === 'delete' ? '🗑' : '±'} ${f.path}`)));
+
+  const approveBtn = el('button', { class: 'btn btn-primary btn-sm' },
+    isDelete ? 'Apagar' : 'Aprovar e commitar');
+  const denyBtn = el('button', { class: 'btn btn-ghost-danger btn-sm' }, 'Recusar');
+
+  const card = el('div', { class: 'msg tool approval' }, [
+    el('div', { class: 'role' }, isDelete ? '⚠ confirmar remoção' : '⚠ branch protegida'),
+    el('div', { class: 'approval-body' }, [
+      el('p', {}, isDelete
+        ? `O agente quer apagar um arquivo de ${req.branch}. Isso sai do HEAD e só volta pelo histórico do GitHub.`
+        : `O agente quer commitar ${req.summary}. Nada foi verificado por build ou teste.`),
+      fileList,
+    ]),
+    el('div', { class: 'approval-actions' }, [denyBtn, approveBtn]),
+  ]);
+
+  function settle(ok) {
+    approveBtn.disabled = true;
+    denyBtn.disabled = true;
+    card.classList.add(ok ? 'approved' : 'denied');
+    card.querySelector('.approval-actions').replaceChildren(
+      el('span', { class: 'field-hint' }, ok ? '✓ aprovado' : '✗ recusado'),
+    );
+    resolvePromise(ok);
+  }
+
+  approveBtn.addEventListener('click', () => settle(true));
+  denyBtn.addEventListener('click', () => settle(false));
+
+  msgsBox.appendChild(card);
+  msgsBox.scrollTop = msgsBox.scrollHeight;
 }
 
 function emptyView(icon, title, text) {
@@ -87,7 +140,6 @@ export async function renderChat(view) {
   shell.appendChild(chatHeader(agent, teamMode, changeMode));
   view.appendChild(shell);
 
-  // Estados de bloqueio: sem provider ou sem modelo resolvido.
   if (!providers.length) {
     const box = el('div', { class: 'chat-messages-scroll' });
     box.appendChild(emptyView('🔌', 'Nenhum modelo configurado',
@@ -105,7 +157,6 @@ export async function renderChat(view) {
     return;
   }
 
-  // Barra de contexto: modelo, repo e contadores da sessão.
   const pillsBar = el('div', { class: 'chat-pills-bar' });
   pillsBar.appendChild(el('span', { class: 'pill accent' }, `${provider.name || provider.type} · ${model.label || model.id}`));
   pillsBar.appendChild(repo
@@ -120,10 +171,23 @@ export async function renderChat(view) {
   const msgsBox = el('div', { class: 'chat-messages-scroll' });
   shell.appendChild(msgsBox);
 
-  const priorChats = await getChats();
-  history = priorChats[0]?.messages || [];
+  const allChats = await getChats();
+  currentChatId = await getActiveChatId();
+  
+  let activeChat = null;
+  if (currentChatId) {
+    activeChat = allChats.find(c => c.id === currentChatId);
+  }
+  
+  if (!activeChat) {
+    currentChatId = `chat_${Date.now()}`;
+    activeChat = { id: currentChatId, title: 'Nova Conversa', updatedAt: new Date().toISOString(), messages: [] };
+    await setActiveChatId(currentChatId);
+  }
 
-  if (!history.length) {
+  history = activeChat.messages || [];
+
+  if (!history.length && !AgentRunner.isRunning) {
     msgsBox.appendChild(teamMode
       ? el('div', { class: 'welcome-box' }, [
         el('div', { class: 'welcome-avatar' }, '👥'),
@@ -137,6 +201,7 @@ export async function renderChat(view) {
         el('div', { class: 'welcome-desc' }, agent?.description || 'Descreva o que você quer fazer no seu repositório.'),
       ]));
   }
+  }
 
   history.forEach(m => {
     if (m.role === 'system' || m.role === 'tool') return;
@@ -144,7 +209,6 @@ export async function renderChat(view) {
     msgsBox.appendChild(bubble(m.role, el('div', { html: renderInlineMd(m.content || '') })));
   });
 
-  // Área de input.
   const input = el('textarea', {
     class: 'chat-textarea',
     rows: '2',
@@ -163,158 +227,160 @@ export async function renderChat(view) {
   ]);
   shell.appendChild(inputArea);
 
+  async function saveCurrentChat() {
+    const chats = await getChats();
+    const idx = chats.findIndex(c => c.id === currentChatId);
+    
+    const chatObj = {
+      id: currentChatId,
+      title: history.find(m => m.role === 'user')?.content?.slice(0, 40) || 'Nova Conversa',
+      updatedAt: new Date().toISOString(),
+      messages: history
+    };
+
+    if (idx >= 0) {
+      chats[idx] = chatObj;
+    } else {
+      chats.unshift(chatObj);
+    }
+    await saveChats(chats);
+  }
+
   clearBtn.addEventListener('click', async () => {
     if (!confirm('Limpar o histórico desta conversa?')) return;
     history = [];
-    await saveChats([{ messages: [] }]);
+    await saveCurrentChat();
     renderChat(view);
   });
 
   let totalCost = 0, totalTk = 0;
+  let assistantNode = null;
+  let currentToolGroup = null;
+  let toolStats = { read: 0, write: 0, err: 0 };
 
-  function trackUsage(inTk, outTk, cost) {
-    totalTk += (inTk || 0) + (outTk || 0);
-    totalCost += cost || 0;
-    tokPill.textContent = fmtTokens(totalTk) + ' tk';
-    costPill.textContent = fmtCost(totalCost);
-  }
-
-  async function sendSolo(text, assistantNode, thinkingHtml) {
-    try {
-      const out = await runAgent({
-        provider, model, agent,
-        userMessage: text,
-        history,
-        onEvent: (ev) => {
-          if (ev.type === 'thinking') {
-            assistantNode.className = 'thinking';
-            assistantNode.innerHTML = thinkingHtml;
-          } else if (ev.type === 'assistant_text' && ev.text) {
-            assistantNode.className = '';
-            assistantNode.innerHTML = renderInlineMd(ev.text);
-          } else if (ev.type === 'tool_call') {
-            msgsBox.appendChild(el('div', { class: 'msg tool' }, [
-              el('div', { class: 'role' }, `→ ${ev.name}`),
-              el('pre', {}, fmtArgs(ev.args)),
-            ]));
-          } else if (ev.type === 'tool_result') {
-            msgsBox.appendChild(el('div', { class: 'msg tool ok' }, [
-              el('div', { class: 'role' }, `✓ ${ev.name}`),
-              el('pre', {}, fmtArgs(ev.result).slice(0, 2000)),
-            ]));
-          } else if (ev.type === 'tool_error') {
-            msgsBox.appendChild(el('div', { class: 'msg tool err' }, [
-              el('div', { class: 'role' }, `✗ ${ev.name}`),
-              el('div', { class: 'error-banner-inline' }, ev.error),
-            ]));
-          } else if (ev.type === 'usage') {
-            trackUsage(ev.usage.input, ev.usage.output, ev.cost);
-          } else if (ev.type === 'error') {
-            assistantNode.className = '';
-            assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, ev.message));
-          }
-          msgsBox.scrollTop = msgsBox.scrollHeight;
-        },
-      });
-      history = out.messages.filter(mm => mm.role !== 'system');
-      await saveChats([{ messages: history }]);
-    } catch (e) {
-      assistantNode.className = '';
-      clear(assistantNode);
-      assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, e.message));
-    }
-  }
-
-  // --- Modo equipe: orquestrador + cards + timeline + commit manual.
-  async function sendTeam(text, assistantNode) {
-    const orch = new Orchestrator();
-    const runView = createRunView();
-    const detach = runView.attach(orch.bus);
-
-    // A bolha do assistente vira o container do run: os cards ficam no lugar
-    // onde a resposta apareceria.
-    assistantNode.className = '';
-    clear(assistantNode);
-    assistantNode.appendChild(runView.root);
-
-    orch.bus.onAny(() => { msgsBox.scrollTop = msgsBox.scrollHeight; });
-    orch.bus.on(EV.USAGE, (ev) => trackUsage(ev.usage?.input, ev.usage?.output, ev.cost));
-
-    try {
-      await orch.run({ userMessage: text });
-      if (orch.stagedFiles.length) {
-        assistantNode.appendChild(commitBar(orch, runView));
+  function getOrCreateToolGroup() {
+    if (currentToolGroup) return currentToolGroup;
+    
+    const summaryText = el('span', { class: 'tool-summary-text' }, 'Trabalhando nos arquivos...');
+    const toggleBtn = el('button', { class: 'tool-group-toggle' }, 'Ver detalhes');
+    const header = el('div', { class: 'tool-group-header' }, [summaryText, toggleBtn]);
+    const details = el('div', { class: 'tool-group-details', style: 'display: none;' });
+    
+    currentToolGroup = {
+      node: el('div', { class: 'msg tool-group' }, [header, details]),
+      details,
+      summaryText,
+      updateSummary: () => {
+        const parts = [];
+        if (toolStats.read) parts.push(`${toolStats.read} lido${toolStats.read > 1 ? 's' : ''}`);
+        if (toolStats.write) parts.push(`${toolStats.write} editado${toolStats.write > 1 ? 's' : ''}`);
+        if (toolStats.err) parts.push(`${toolStats.err} erro${toolStats.err > 1 ? 's' : ''}`);
+        summaryText.textContent = parts.length ? parts.join(', ') : 'Trabalhando...';
+        if (toolStats.err) summaryText.classList.add('has-error');
       }
-      // O histórico do chat guarda o pedido e o resumo, não o run inteiro:
-      // reabrir o painel não deve tentar reconstruir cards de uma execução morta.
-      history = [
-        ...history,
-        { role: 'user', content: text },
-        { role: 'assistant', content: teamSummaryText(orch) },
-      ];
-      await saveChats([{ messages: history }]);
-    } catch (e) {
-      assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, e.message));
-    } finally {
-      detach();
-    }
-  }
+    };
 
-  function teamSummaryText(orch) {
-    const tasks = orch.graph.all;
-    const lines = tasks.map(t => {
-      const mark = t.status === 'completed' ? '✅' : t.status === 'failed' ? '❌' : '⏹️';
-      return `${mark} ${t.agentId}: ${t.result ? t.result.slice(0, 400) : (t.error || t.status)}`;
+    toggleBtn.addEventListener('click', () => {
+      const isHidden = details.style.display === 'none';
+      details.style.display = isHidden ? 'flex' : 'none';
+      toggleBtn.textContent = isHidden ? 'Ocultar detalhes' : 'Ver detalhes';
     });
-    const staged = orch.stagedFiles;
-    if (staged.length) {
-      lines.push('', `**${staged.length} arquivo(s) em staging, aguardando commit:** ${staged.map(s => s.path).join(', ')}`);
+
+    if (assistantNode && assistantNode.parentElement) {
+      msgsBox.insertBefore(currentToolGroup.node, assistantNode.parentElement);
+    } else {
+      msgsBox.appendChild(currentToolGroup.node);
     }
-    return lines.join('\n');
+    return currentToolGroup;
   }
 
-  // Barra de commit: a única porta de saída do staging no modo equipe. Nada
-  // commita sem o usuário clicar aqui.
-  function commitBar(orch, runView) {
-    const staged = orch.stagedFiles;
-    const bar = el('div', { class: 'commit-bar' });
-    const text = el('div', { class: 'commit-bar-text' }, [
-      el('strong', {}, `${staged.length} arquivo(s) em staging`),
-      el('span', {}, ` · ${repo.fullName} @ ${repo.branch}. Nada foi commitado ainda.`),
-    ]);
-    const commitBtn = el('button', { class: 'btn btn-primary btn-sm' }, 'Commitar');
-    const discardBtn = el('button', { class: 'btn btn-ghost btn-sm' }, 'Descartar');
+  // Conecta ao Runner Global
+  const unsubscribe = AgentRunner.subscribe((ev) => {
+    const thinkingHtml = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
 
-    commitBtn.addEventListener('click', async () => {
-      const list = orch.stagedFiles.map(s => `- ${s.path} (+${s.added}/-${s.removed})`).join('\n');
-      if (!confirm(`Commitar em ${repo.fullName} @ ${repo.branch}?\n\n${list}`)) return;
-      commitBtn.disabled = true;
-      discardBtn.disabled = true;
-      try {
-        const commits = await orch.commitStaged({ confirmed: true });
-        clear(bar);
-        bar.appendChild(el('div', { class: 'commit-bar-text' }, [
-          el('strong', {}, '✅ Commitado: '),
-          el('span', {}, commits.map(c => c.sha?.slice(0, 7)).join(', ')),
-        ]));
-      } catch (e) {
-        commitBtn.disabled = false;
-        discardBtn.disabled = false;
-        bar.appendChild(el('div', { class: 'error-banner-inline' }, e.message));
+    if (ev.type === 'start') {
+      sendBtn.disabled = true;
+      msgsBox.querySelector('.welcome-box')?.remove();
+      if (!history.find(m => m.role === 'user' && m.content === ev.text)) {
+        msgsBox.appendChild(bubble('user', el('div', { html: renderInlineMd(ev.text) })));
       }
-    });
+      assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
+      msgsBox.appendChild(bubble('assistant', assistantNode));
+      msgsBox.scrollTop = msgsBox.scrollHeight;
+    } else if (ev.type === 'thinking') {
+      if (!assistantNode) {
+        assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
+        msgsBox.appendChild(bubble('assistant', assistantNode));
+      }
+      assistantNode.className = 'thinking';
+      assistantNode.innerHTML = thinkingHtml;
+      currentToolGroup = null;
+      toolStats = { read: 0, write: 0, err: 0 };
+    } else if (ev.type === 'assistant_text' && ev.text) {
+      if (assistantNode) {
+        assistantNode.className = '';
+        assistantNode.innerHTML = renderInlineMd(ev.text);
+      }
+    } else if (ev.type === 'tool_call') {
+      const group = getOrCreateToolGroup();
+      if (ev.name.includes('read') || ev.name.includes('list')) toolStats.read++;
+      else toolStats.write++;
+      group.updateSummary();
+      
+      group.details.appendChild(el('div', { class: 'tool-item call' }, [
+        el('div', { class: 'tool-name' }, `→ ${ev.name}`),
+        el('pre', {}, fmtArgs(ev.args)),
+      ]));
+    } else if (ev.type === 'tool_result') {
+      const group = getOrCreateToolGroup();
+      group.details.appendChild(el('div', { class: 'tool-item ok' }, [
+        el('div', { class: 'tool-name' }, `✓ ${ev.name}`),
+        el('pre', {}, fmtArgs(ev.result).slice(0, 1000) + (JSON.stringify(ev.result).length > 1000 ? '...' : '')),
+      ]));
+    } else if (ev.type === 'tool_error') {
+      const group = getOrCreateToolGroup();
+      toolStats.err++;
+      group.updateSummary();
+      group.details.appendChild(el('div', { class: 'tool-item err' }, [
+        el('div', { class: 'tool-name' }, `✗ ${ev.name}`),
+        el('div', { class: 'error-banner-inline' }, ev.error),
+      ]));
+    } else if (ev.type === 'usage') {
+      totalTk += (ev.usage.input || 0) + (ev.usage.output || 0);
+      totalCost += ev.cost || 0;
+      tokPill.textContent = fmtTokens(totalTk) + ' tk';
+      costPill.textContent = fmtCost(totalCost);
+    } else if (ev.type === 'error') {
+      if (assistantNode) {
+        assistantNode.className = '';
+        assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, ev.message));
+      }
+    } else if (ev.type === 'retry') {
+      if (assistantNode) {
+        assistantNode.className = '';
+        assistantNode.appendChild(el('div', { class: 'error-banner-inline', style: 'background: var(--warn-soft); color: var(--warn); border-color: var(--warn);' }, ev.message));
+      }
+    } else if (ev.type === 'approval_request') {
+      askApproval(msgsBox, ev.req, ev.resolve);
+    } else if (ev.type === 'done') {
+      sendBtn.disabled = false;
+      history = AgentRunner.history;
+    }
+    
+    msgsBox.scrollTop = msgsBox.scrollHeight;
+  });
 
-    discardBtn.addEventListener('click', () => {
-      if (!confirm('Descartar as mudanças em staging? Elas serão perdidas.')) return;
-      const n = orch.discardStaged();
-      clear(bar);
-      bar.appendChild(el('div', { class: 'commit-bar-text' }, `${n} mudança(s) descartada(s).`));
-    });
-
-    bar.appendChild(text);
-    bar.appendChild(el('div', { class: 'commit-bar-actions' }, [discardBtn, commitBtn]));
-    return bar;
+  if (AgentRunner.isRunning) {
+    sendBtn.disabled = true;
   }
+
+  const observer = new MutationObserver((mutations) => {
+    if (!document.body.contains(shell)) {
+      unsubscribe();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
   async function send() {
     const text = input.value.trim();
@@ -345,6 +411,7 @@ export async function renderChat(view) {
       sendBtn.disabled = false;
       msgsBox.scrollTop = msgsBox.scrollHeight;
     }
+  }
   }
 
   sendBtn.addEventListener('click', send);

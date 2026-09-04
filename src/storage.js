@@ -1,4 +1,5 @@
 import { getProviderType } from './providers/catalog.js';
+import { DEFAULT_PROTECTED_BRANCHES } from './agent/guard.js';
 
 const KEYS = {
   providers: 'tom.providers',
@@ -243,6 +244,15 @@ export async function getSettings() {
     // continua sendo o caminho conhecido de quem já usa a extensão.
     teamMode: false,
     maxParallelAgents: 2,
+    // Portões de aprovação humana. Ligados por padrão: o agente não tem como
+    // rodar build/teste no browser, então commit em branch protegida e remoção
+    // de arquivo passam pelo usuário.
+    confirmProtectedCommit: true,
+    confirmDelete: true,
+    protectedBranches: DEFAULT_PROTECTED_BRANCHES.join(', '),
+    // Fallback automático de modelos
+    autoFallback: false,
+    fallbackQueue: [], // Array de strings no formato "providerId::modelId"
     ...cur,
   };
 }
@@ -253,11 +263,32 @@ export async function setSettings(v) {
 }
 
 export async function getChats() {
-  return get(KEYS.chats, []);
+  const list = await get(KEYS.chats, []);
+  // Migração de formato antigo (array de objetos com apenas {messages: []})
+  // para o novo formato com id, title, updatedAt.
+  if (list.length > 0 && !list[0].id) {
+    const migrated = list.map((c, i) => ({
+      id: `chat_${Date.now()}_${i}`,
+      title: c.messages?.[0]?.content?.slice(0, 40) || 'Conversa sem título',
+      updatedAt: new Date().toISOString(),
+      messages: c.messages || [],
+    }));
+    await set(KEYS.chats, migrated);
+    return migrated;
+  }
+  return list;
 }
 
 export async function saveChats(v) {
   await set(KEYS.chats, v);
+}
+
+export async function getActiveChatId() {
+  return get('tom.activeChatId', null);
+}
+
+export async function setActiveChatId(id) {
+  await set('tom.activeChatId', id);
 }
 
 export async function getAgents() {
