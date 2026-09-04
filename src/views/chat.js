@@ -154,9 +154,17 @@ export async function renderChat(view) {
   shell.appendChild(inputArea);
   view.appendChild(shell);
 
-  const [providers, globalActive, repo, agent, settings] = await Promise.all([
-    getProviders(), getActiveModel(), getRepo(), getActiveAgent(), getSettings(),
-  ]);
+  let providers, globalActive, repo, agent, settings;
+  try {
+    [providers, globalActive, repo, agent, settings] = await Promise.all([
+      getProviders(), getActiveModel(), getRepo(), getActiveAgent(), getSettings(),
+    ]);
+  } catch (err) {
+    console.error('Error loading chat data:', err);
+    msgsBox.appendChild(emptyView('⚠️', 'Erro ao carregar dados', err.message));
+    input.placeholder = 'Erro ao carregar';
+    return;
+  }
 
   const teamMode = settings.teamMode === true;
 

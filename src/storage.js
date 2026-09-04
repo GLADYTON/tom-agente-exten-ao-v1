@@ -74,35 +74,40 @@ function seedReadyProvidersOnce() {
 }
 
 async function doSeedReadyProviders() {
-  if (await get(KEYS.seededGateways, false)) return;
+  try {
+    if (await get(KEYS.seededGateways, false)) return;
 
-  const current = await get(KEYS.providers, []);
-  const already = current.some(p =>
-    p.type === 'dgsis-gateway' || (p.endpoint || '').includes('gtw.cloud2.dgsis.com.br'));
+    const current = await get(KEYS.providers, []);
+    const already = current.some(p =>
+      p.type === 'dgsis-gateway' || (p.endpoint || '').includes('gtw.cloud2.dgsis.com.br'));
 
-  if (!already) {
-    const type = getProviderType('dgsis-gateway');
-    const seeded = {
-      id: 'p_dgsis_seeded',
-      type: type.id,
-      name: type.label,
-      apiKey: type.defaultApiKey,
-      endpoint: type.endpoint,
-      authScheme: type.authScheme,
-      credentialType: 'static_key',
-      isGateway: true,
-      models: JSON.parse(JSON.stringify(type.models)),
-    };
-    current.unshift(seeded);
-    await set(KEYS.providers, current);
+    if (!already) {
+      const type = getProviderType('dgsis-gateway');
+      const seeded = {
+        id: 'p_dgsis_seeded',
+        type: type.id,
+        name: type.label,
+        apiKey: type.defaultApiKey,
+        endpoint: type.endpoint,
+        authScheme: type.authScheme,
+        credentialType: 'static_key',
+        isGateway: true,
+        models: JSON.parse(JSON.stringify(type.models)),
+      };
+      current.unshift(seeded);
+      await set(KEYS.providers, current);
 
-    // Sem modelo ativo ainda: já deixa o gateway pronto para conversar.
-    if (!(await get(KEYS.activeModel, null))) {
-      await set(KEYS.activeModel, { providerId: seeded.id, modelId: seeded.models[0].id });
+      // Sem modelo ativo ainda: já deixa o gateway pronto para conversar.
+      if (!(await get(KEYS.activeModel, null))) {
+        await set(KEYS.activeModel, { providerId: seeded.id, modelId: seeded.models[0].id });
+      }
     }
-  }
 
-  await set(KEYS.seededGateways, true);
+    await set(KEYS.seededGateways, true);
+  } catch (err) {
+    console.error('Error seeding providers:', err);
+    // Não lança o erro para não travar a inicialização
+  }
 }
 
 export async function saveProviders(list) {

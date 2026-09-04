@@ -24,32 +24,42 @@ const view = document.getElementById('view');
 const statusEl = document.getElementById('topbar-status');
 
 async function refreshStatus() {
-  const [providers, active, github, repo, agent] = await Promise.all([
-    getProviders(), getActiveModel(), getGithub(), getRepo(), getActiveAgent(),
-  ]);
+  try {
+    const [providers, active, github, repo, agent] = await Promise.all([
+      getProviders(), getActiveModel(), getGithub(), getRepo(), getActiveAgent(),
+    ]);
 
-  const parts = [];
-  parts.push(`${agent?.emoji || '🤖'} ${agent?.name || 'sem agente'}`);
+    const parts = [];
+    parts.push(`${agent?.emoji || '🤖'} ${agent?.name || 'sem agente'}`);
 
-  if (active) {
-    const p = providers.find(pp => pp.id === active.providerId);
-    const m = p?.models?.find(mm => mm.id === active.modelId);
-    parts.push(`${p?.name || '?'} · ${m?.label || '?'}`);
-  } else {
-    parts.push('sem modelo');
+    if (active) {
+      const p = providers.find(pp => pp.id === active.providerId);
+      const m = p?.models?.find(mm => mm.id === active.modelId);
+      parts.push(`${p?.name || '?'} · ${m?.label || '?'}`);
+    } else {
+      parts.push('sem modelo');
+    }
+
+    parts.push(github.user ? `@${github.user.login}` : 'sem github');
+    if (repo) parts.push(repo.fullName);
+
+    statusEl.textContent = parts.join('  ·  ');
+  } catch (err) {
+    console.error('Error refreshing status:', err);
+    statusEl.textContent = 'Erro ao carregar status';
   }
-
-  parts.push(github.user ? `@${github.user.login}` : 'sem github');
-  if (repo) parts.push(repo.fullName);
-
-  statusEl.textContent = parts.join('  ·  ');
 }
 
 async function switchTo(name) {
-  tabs.forEach(t => t.setAttribute('aria-selected', t.dataset.view === name ? 'true' : 'false'));
-  view.classList.toggle('view-flush', FLUSH_VIEWS.has(name));
-  await VIEWS[name](view);
-  refreshStatus();
+  try {
+    tabs.forEach(t => t.setAttribute('aria-selected', t.dataset.view === name ? 'true' : 'false'));
+    view.classList.toggle('view-flush', FLUSH_VIEWS.has(name));
+    await VIEWS[name](view);
+    refreshStatus();
+  } catch (err) {
+    console.error(`Error switching to view ${name}:`, err);
+    view.innerHTML = `<div class="error-banner">Erro ao carregar a aba: ${err.message}</div>`;
+  }
 }
 
 tabs.forEach(t => t.addEventListener('click', () => switchTo(t.dataset.view)));
