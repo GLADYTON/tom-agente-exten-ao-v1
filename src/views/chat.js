@@ -124,6 +124,36 @@ function emptyView(icon, title, text) {
 export async function renderChat(view) {
   clear(view);
 
+  // Renderiza o shell imediatamente para evitar tela em branco
+  const shell = el('div', { class: 'chat-shell-v2' });
+  const headerContainer = el('div');
+  const pillsBar = el('div', { class: 'chat-pills-bar' });
+  const msgsBox = el('div', { class: 'chat-messages-scroll' });
+  
+  const input = el('textarea', {
+    class: 'chat-textarea',
+    rows: '2',
+    placeholder: 'Carregando...',
+    disabled: true
+  });
+
+  const sendBtn = el('button', { class: 'btn btn-primary btn-sm', disabled: true }, 'Enviar');
+  const clearBtn = el('button', { class: 'btn btn-ghost btn-sm', title: 'Limpar histórico', disabled: true }, 'Limpar');
+
+  const inputArea = el('div', { class: 'chat-input-area' }, [
+    el('div', { class: 'chat-textarea-box' }, [input]),
+    el('div', { class: 'chat-bottom-actions' }, [
+      el('span', { class: 'kbd-hint' }, 'Ctrl+Enter envia'),
+      el('div', { class: 'chat-header-actions' }, [clearBtn, sendBtn]),
+    ]),
+  ]);
+
+  shell.appendChild(headerContainer);
+  shell.appendChild(pillsBar);
+  shell.appendChild(msgsBox);
+  shell.appendChild(inputArea);
+  view.appendChild(shell);
+
   const [providers, globalActive, repo, agent, settings] = await Promise.all([
     getProviders(), getActiveModel(), getRepo(), getActiveAgent(), getSettings(),
   ]);
@@ -136,28 +166,23 @@ export async function renderChat(view) {
     renderChat(view);
   }
 
-  const shell = el('div', { class: 'chat-shell-v2' });
-  shell.appendChild(chatHeader(agent, teamMode, changeMode));
-  view.appendChild(shell);
+  headerContainer.appendChild(chatHeader(agent, teamMode, changeMode));
 
   if (!providers.length) {
-    const box = el('div', { class: 'chat-messages-scroll' });
-    box.appendChild(emptyView('🔌', 'Nenhum modelo configurado',
+    msgsBox.appendChild(emptyView('🔌', 'Nenhum modelo configurado',
       'Vá na aba Modelos e adicione um provider de IA. Vários funcionam de graça.'));
-    shell.appendChild(box);
+    inputArea.style.display = 'none';
     return;
   }
 
   const { provider, model } = resolveModel(providers, agent, globalActive);
   if (!model) {
-    const box = el('div', { class: 'chat-messages-scroll' });
-    box.appendChild(emptyView('🎯', 'Escolha um modelo',
+    msgsBox.appendChild(emptyView('🎯', 'Escolha um modelo',
       'Defina o modelo padrão na aba Modelos, ou dê um modelo próprio a este agente em Agentes.'));
-    shell.appendChild(box);
+    inputArea.style.display = 'none';
     return;
   }
 
-  const pillsBar = el('div', { class: 'chat-pills-bar' });
   pillsBar.appendChild(el('span', { class: 'pill accent' }, `${provider.name || provider.type} · ${model.label || model.id}`));
   pillsBar.appendChild(repo
     ? el('span', { class: 'pill' }, `${repo.fullName} @ ${repo.branch}`)
@@ -166,10 +191,6 @@ export async function renderChat(view) {
   const costPill = el('span', { class: 'pill' }, '$0.0000');
   pillsBar.appendChild(tokPill);
   pillsBar.appendChild(costPill);
-  shell.appendChild(pillsBar);
-
-  const msgsBox = el('div', { class: 'chat-messages-scroll' });
-  shell.appendChild(msgsBox);
 
   const allChats = await getChats();
   currentChatId = await getActiveChatId();
@@ -201,7 +222,6 @@ export async function renderChat(view) {
         el('div', { class: 'welcome-desc' }, agent?.description || 'Descreva o que você quer fazer no seu repositório.'),
       ]));
   }
-  }
 
   history.forEach(m => {
     if (m.role === 'system' || m.role === 'tool') return;
@@ -209,23 +229,12 @@ export async function renderChat(view) {
     msgsBox.appendChild(bubble(m.role, el('div', { html: renderInlineMd(m.content || '') })));
   });
 
-  const input = el('textarea', {
-    class: 'chat-textarea',
-    rows: '2',
-    placeholder: `Diga ao ${agent?.name || 'agente'} o que fazer...`,
-  });
-
-  const sendBtn = el('button', { class: 'btn btn-primary btn-sm' }, 'Enviar');
-  const clearBtn = el('button', { class: 'btn btn-ghost btn-sm', title: 'Limpar histórico' }, 'Limpar');
-
-  const inputArea = el('div', { class: 'chat-input-area' }, [
-    el('div', { class: 'chat-textarea-box' }, [input]),
-    el('div', { class: 'chat-bottom-actions' }, [
-      el('span', { class: 'kbd-hint' }, 'Ctrl+Enter envia'),
-      el('div', { class: 'chat-header-actions' }, [clearBtn, sendBtn]),
-    ]),
-  ]);
-  shell.appendChild(inputArea);
+  input.placeholder = `Diga ao ${agent?.name || 'agente'} o que fazer...`;
+  input.disabled = false;
+  clearBtn.disabled = false;
+  if (!AgentRunner.isRunning) {
+    sendBtn.disabled = false;
+  }
 
   async function saveCurrentChat() {
     const chats = await getChats();
@@ -405,13 +414,18 @@ export async function renderChat(view) {
     msgsBox.appendChild(bubble('assistant', assistantNode));
 
     try {
-      if (teamMode) await sendTeam(text, assistantNode);
-      else await sendSolo(text, assistantNode, thinkingHtml);
+      if (teamMode) {
+        // Import dinâmico para não bloquear o carregamento inicial
+        const { sendTeam } = await import('../agent/orchestrator.js');
+        await sendTeam(text, assistantNode);
+      } else {
+        const { sendSolo } = await import('../agent/loop.js');
+        await sendSolo(text, assistantNode, thinkingHtml);
+      }
     } finally {
       sendBtn.disabled = false;
       msgsBox.scrollTop = msgsBox.scrollHeight;
     }
-  }
   }
 
   sendBtn.addEventListener('click', send);
