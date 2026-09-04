@@ -246,6 +246,9 @@ export async function getSettings() {
     confirmProtectedCommit: true,
     confirmDelete: true,
     protectedBranches: DEFAULT_PROTECTED_BRANCHES.join(', '),
+    // Fallback automático de modelos
+    autoFallback: false,
+    fallbackQueue: [], // Array de strings no formato "providerId::modelId"
     ...cur,
   };
 }
