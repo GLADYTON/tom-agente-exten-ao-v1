@@ -1,6 +1,13 @@
 import { el, clear, renderInlineMd, fmtCost, fmtTokens } from '../util/dom.js';
-import { getProviders, getActiveModel, getRepo, getChats, saveChats, getActiveAgent } from '../storage.js';
+import {
+  getProviders, getActiveModel, getRepo, getChats, saveChats, getActiveAgent,
+  getSettings, setSettings,
+} from '../storage.js';
 import { runAgent } from '../agent/loop.js';
+import { resolveModel } from '../agent/model.js';
+import { Orchestrator } from '../agent/orchestrator.js';
+import { EV } from '../agent/events.js';
+import { createRunView } from './runview.js';
 
 let history = [];
 
@@ -15,33 +22,36 @@ function fmtArgs(a) {
   try { return JSON.stringify(a, null, 2); } catch { return String(a); }
 }
 
-function lookup(providers, ref) {
-  if (!ref) return null;
-  const p = providers.find(pp => pp.id === ref.providerId);
-  const m = p?.models?.find(mm => mm.id === ref.modelId);
-  return p && m ? { provider: p, model: m } : null;
-}
-
-// Modelo do agente tem prioridade; se o provider dele foi removido, cai no global.
-function resolveModel(providers, agent, globalActive) {
-  return lookup(providers, agent?.modelRef)
-    || lookup(providers, globalActive)
-    || { provider: null, model: null };
-}
-
 function openAgents() {
   if (window._openAgentsPanel) window._openAgentsPanel();
 }
 
-// Header fixo do chat: identidade do agente + botão que abre o painel de agentes.
-function chatHeader(agent) {
+// Alterna entre agente único e equipe. Persiste na hora: o usuário não deveria
+// precisar ir em Config para escolher como quer trabalhar.
+function modeToggle(teamMode, onChange) {
+  const soloBtn = el('button', { class: teamMode ? '' : 'active', title: 'Um agente executa o pedido inteiro' }, '👤 Solo');
+  const teamBtn = el('button', { class: teamMode ? 'active' : '', title: 'Orquestrador divide o pedido entre agentes especialistas' }, '👥 Equipe');
+  soloBtn.addEventListener('click', () => onChange(false));
+  teamBtn.addEventListener('click', () => onChange(true));
+  return el('div', { class: 'mode-toggle' }, [soloBtn, teamBtn]);
+}
+
+// Header fixo do chat: identidade do agente + modo + botão do painel de agentes.
+function chatHeader(agent, teamMode, onModeChange) {
   return el('div', { class: 'chat-top-header' }, [
-    el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
-      el('span', { class: 'chat-agent-emoji' }, agent?.emoji || '🤖'),
-      el('span', { class: 'chat-agent-name' }, agent?.name || 'Sem agente'),
-      el('span', { class: 'chat-agent-badge' }, 'ativo'),
-    ]),
+    teamMode
+      ? el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
+        el('span', { class: 'chat-agent-emoji' }, '👥'),
+        el('span', { class: 'chat-agent-name' }, 'Equipe'),
+        el('span', { class: 'chat-agent-badge' }, '3 agentes'),
+      ])
+      : el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
+        el('span', { class: 'chat-agent-emoji' }, agent?.emoji || '🤖'),
+        el('span', { class: 'chat-agent-name' }, agent?.name || 'Sem agente'),
+        el('span', { class: 'chat-agent-badge' }, 'ativo'),
+      ]),
     el('div', { class: 'chat-header-actions' }, [
+      modeToggle(teamMode, onModeChange),
       el('button', { class: 'btn-agents-toggle', onclick: openAgents }, [
         el('span', {}, '🤖'),
         el('span', {}, 'Agentes'),
@@ -61,12 +71,20 @@ function emptyView(icon, title, text) {
 export async function renderChat(view) {
   clear(view);
 
-  const [providers, globalActive, repo, agent] = await Promise.all([
-    getProviders(), getActiveModel(), getRepo(), getActiveAgent(),
+  const [providers, globalActive, repo, agent, settings] = await Promise.all([
+    getProviders(), getActiveModel(), getRepo(), getActiveAgent(), getSettings(),
   ]);
 
+  const teamMode = settings.teamMode === true;
+
+  async function changeMode(next) {
+    if (next === teamMode) return;
+    await setSettings({ teamMode: next });
+    renderChat(view);
+  }
+
   const shell = el('div', { class: 'chat-shell-v2' });
-  shell.appendChild(chatHeader(agent));
+  shell.appendChild(chatHeader(agent, teamMode, changeMode));
   view.appendChild(shell);
 
   // Estados de bloqueio: sem provider ou sem modelo resolvido.
@@ -106,11 +124,18 @@ export async function renderChat(view) {
   history = priorChats[0]?.messages || [];
 
   if (!history.length) {
-    msgsBox.appendChild(el('div', { class: 'welcome-box' }, [
-      el('div', { class: 'welcome-avatar' }, agent?.emoji || '🤖'),
-      el('div', { class: 'welcome-title' }, `Olá, sou o ${agent?.name || 'agente'}`),
-      el('div', { class: 'welcome-desc' }, agent?.description || 'Descreva o que você quer fazer no seu repositório.'),
-    ]));
+    msgsBox.appendChild(teamMode
+      ? el('div', { class: 'welcome-box' }, [
+        el('div', { class: 'welcome-avatar' }, '👥'),
+        el('div', { class: 'welcome-title' }, 'Modo equipe'),
+        el('div', { class: 'welcome-desc' },
+          'Descreva o que você quer. O orquestrador divide entre 🎨 Frontend, ⚙️ Backend e 🧪 Code Reviewer. As mudanças ficam em staging até você aprovar o commit.'),
+      ])
+      : el('div', { class: 'welcome-box' }, [
+        el('div', { class: 'welcome-avatar' }, agent?.emoji || '🤖'),
+        el('div', { class: 'welcome-title' }, `Olá, sou o ${agent?.name || 'agente'}`),
+        el('div', { class: 'welcome-desc' }, agent?.description || 'Descreva o que você quer fazer no seu repositório.'),
+      ]));
   }
 
   history.forEach(m => {
@@ -147,20 +172,14 @@ export async function renderChat(view) {
 
   let totalCost = 0, totalTk = 0;
 
-  async function send() {
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = '';
-    sendBtn.disabled = true;
+  function trackUsage(inTk, outTk, cost) {
+    totalTk += (inTk || 0) + (outTk || 0);
+    totalCost += cost || 0;
+    tokPill.textContent = fmtTokens(totalTk) + ' tk';
+    costPill.textContent = fmtCost(totalCost);
+  }
 
-    msgsBox.querySelector('.welcome-box')?.remove();
-    msgsBox.appendChild(bubble('user', el('div', { html: renderInlineMd(text) })));
-    msgsBox.scrollTop = msgsBox.scrollHeight;
-
-    const thinkingHtml = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
-    const assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
-    msgsBox.appendChild(bubble('assistant', assistantNode));
-
+  async function sendSolo(text, assistantNode, thinkingHtml) {
     try {
       const out = await runAgent({
         provider, model, agent,
@@ -189,10 +208,7 @@ export async function renderChat(view) {
               el('div', { class: 'error-banner-inline' }, ev.error),
             ]));
           } else if (ev.type === 'usage') {
-            totalTk += (ev.usage.input || 0) + (ev.usage.output || 0);
-            totalCost += ev.cost || 0;
-            tokPill.textContent = fmtTokens(totalTk) + ' tk';
-            costPill.textContent = fmtCost(totalCost);
+            trackUsage(ev.usage.input, ev.usage.output, ev.cost);
           } else if (ev.type === 'error') {
             assistantNode.className = '';
             assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, ev.message));
@@ -206,6 +222,125 @@ export async function renderChat(view) {
       assistantNode.className = '';
       clear(assistantNode);
       assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, e.message));
+    }
+  }
+
+  // --- Modo equipe: orquestrador + cards + timeline + commit manual.
+  async function sendTeam(text, assistantNode) {
+    const orch = new Orchestrator();
+    const runView = createRunView();
+    const detach = runView.attach(orch.bus);
+
+    // A bolha do assistente vira o container do run: os cards ficam no lugar
+    // onde a resposta apareceria.
+    assistantNode.className = '';
+    clear(assistantNode);
+    assistantNode.appendChild(runView.root);
+
+    orch.bus.onAny(() => { msgsBox.scrollTop = msgsBox.scrollHeight; });
+    orch.bus.on(EV.USAGE, (ev) => trackUsage(ev.usage?.input, ev.usage?.output, ev.cost));
+
+    try {
+      await orch.run({ userMessage: text });
+      if (orch.stagedFiles.length) {
+        assistantNode.appendChild(commitBar(orch, runView));
+      }
+      // O histórico do chat guarda o pedido e o resumo, não o run inteiro:
+      // reabrir o painel não deve tentar reconstruir cards de uma execução morta.
+      history = [
+        ...history,
+        { role: 'user', content: text },
+        { role: 'assistant', content: teamSummaryText(orch) },
+      ];
+      await saveChats([{ messages: history }]);
+    } catch (e) {
+      assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, e.message));
+    } finally {
+      detach();
+    }
+  }
+
+  function teamSummaryText(orch) {
+    const tasks = orch.graph.all;
+    const lines = tasks.map(t => {
+      const mark = t.status === 'completed' ? '✅' : t.status === 'failed' ? '❌' : '⏹️';
+      return `${mark} ${t.agentId}: ${t.result ? t.result.slice(0, 400) : (t.error || t.status)}`;
+    });
+    const staged = orch.stagedFiles;
+    if (staged.length) {
+      lines.push('', `**${staged.length} arquivo(s) em staging, aguardando commit:** ${staged.map(s => s.path).join(', ')}`);
+    }
+    return lines.join('\n');
+  }
+
+  // Barra de commit: a única porta de saída do staging no modo equipe. Nada
+  // commita sem o usuário clicar aqui.
+  function commitBar(orch, runView) {
+    const staged = orch.stagedFiles;
+    const bar = el('div', { class: 'commit-bar' });
+    const text = el('div', { class: 'commit-bar-text' }, [
+      el('strong', {}, `${staged.length} arquivo(s) em staging`),
+      el('span', {}, ` · ${repo.fullName} @ ${repo.branch}. Nada foi commitado ainda.`),
+    ]);
+    const commitBtn = el('button', { class: 'btn btn-primary btn-sm' }, 'Commitar');
+    const discardBtn = el('button', { class: 'btn btn-ghost btn-sm' }, 'Descartar');
+
+    commitBtn.addEventListener('click', async () => {
+      const list = orch.stagedFiles.map(s => `- ${s.path} (+${s.added}/-${s.removed})`).join('\n');
+      if (!confirm(`Commitar em ${repo.fullName} @ ${repo.branch}?\n\n${list}`)) return;
+      commitBtn.disabled = true;
+      discardBtn.disabled = true;
+      try {
+        const commits = await orch.commitStaged({ confirmed: true });
+        clear(bar);
+        bar.appendChild(el('div', { class: 'commit-bar-text' }, [
+          el('strong', {}, '✅ Commitado: '),
+          el('span', {}, commits.map(c => c.sha?.slice(0, 7)).join(', ')),
+        ]));
+      } catch (e) {
+        commitBtn.disabled = false;
+        discardBtn.disabled = false;
+        bar.appendChild(el('div', { class: 'error-banner-inline' }, e.message));
+      }
+    });
+
+    discardBtn.addEventListener('click', () => {
+      if (!confirm('Descartar as mudanças em staging? Elas serão perdidas.')) return;
+      const n = orch.discardStaged();
+      clear(bar);
+      bar.appendChild(el('div', { class: 'commit-bar-text' }, `${n} mudança(s) descartada(s).`));
+    });
+
+    bar.appendChild(text);
+    bar.appendChild(el('div', { class: 'commit-bar-actions' }, [discardBtn, commitBtn]));
+    return bar;
+  }
+
+  async function send() {
+    const text = input.value.trim();
+    if (!text) return;
+
+    if (teamMode && !repo) {
+      msgsBox.appendChild(el('div', { class: 'error-banner-inline' },
+        'O modo equipe precisa de um repositório ativo. Selecione um na aba Repos.'));
+      msgsBox.scrollTop = msgsBox.scrollHeight;
+      return;
+    }
+
+    input.value = '';
+    sendBtn.disabled = true;
+
+    msgsBox.querySelector('.welcome-box')?.remove();
+    msgsBox.appendChild(bubble('user', el('div', { html: renderInlineMd(text) })));
+    msgsBox.scrollTop = msgsBox.scrollHeight;
+
+    const thinkingHtml = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+    const assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
+    msgsBox.appendChild(bubble('assistant', assistantNode));
+
+    try {
+      if (teamMode) await sendTeam(text, assistantNode);
+      else await sendSolo(text, assistantNode, thinkingHtml);
     } finally {
       sendBtn.disabled = false;
       msgsBox.scrollTop = msgsBox.scrollHeight;

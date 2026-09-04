@@ -239,6 +239,10 @@ export async function getSettings() {
     systemPrompt: '',
     autoCommit: true,
     autoReview: true,
+    // Modo equipe (multiagente). Desligado por padrão: o modo de agente único
+    // continua sendo o caminho conhecido de quem já usa a extensão.
+    teamMode: false,
+    maxParallelAgents: 2,
     ...cur,
   };
 }

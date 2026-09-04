@@ -40,13 +40,20 @@ function filterTools(agent) {
   return TOOL_DEFS.filter(t => allowed.has(t.name));
 }
 
-export async function runAgent({ provider, model, agent, userMessage, history, onEvent }) {
+// `overrides`, `stage` e `signal` existem para o modo orquestrado (multi-agente):
+// vários agentes compartilham UM staging, ninguém commita sozinho e o supervisor
+// pode cancelar. Chamado sem eles, o comportamento é o de sempre.
+export async function runAgent({
+  provider, model, agent, userMessage, history, onEvent,
+  stage: externalStage = null, overrides = {}, signal = null,
+}) {
   const settings = await getSettings();
   const budget = await getBudget();
   const repo = await getRepo();
 
-  const autoCommit = settings.autoCommit !== false;
-  const autoReview = settings.autoReview !== false;
+  const orchestrated = !!externalStage;
+  const autoCommit = overrides.autoCommit ?? (settings.autoCommit !== false);
+  const autoReview = overrides.autoReview ?? (settings.autoReview !== false);
 
   const systemBase = agent?.systemPrompt || settings.systemPrompt || DEFAULT_SYSTEM;
   const system = [
@@ -54,23 +61,28 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
     repo
       ? `\nRepositório ativo: ${repo.fullName} (branch: ${repo.branch}).`
       : '\nNenhum repositório ativo. Peça ao usuário para selecionar um em Repos.',
-    autoCommit
-      ? '\nAs edições são commitadas automaticamente em um único commit ao final do turno.'
-      : '\nO commit automático está desligado: avise o usuário que as mudanças ficaram pendentes.',
+    orchestrated
+      ? '\nSuas edições vão para uma área de staging compartilhada com os outros agentes. Você NÃO commita: o usuário decide isso no fim.'
+      : autoCommit
+        ? '\nAs edições são commitadas automaticamente em um único commit ao final do turno.'
+        : '\nO commit automático está desligado: avise o usuário que as mudanças ficaram pendentes.',
+    overrides.extraSystem ? `\n\n${overrides.extraSystem}` : '',
   ].join('');
 
   const tools = filterTools(agent);
   const messages = [{ role: 'system', content: system }, ...history, { role: 'user', content: userMessage }];
-  const maxIter = settings.maxIterations || 12;
+  const maxIter = overrides.maxIterations || agent?.maxIterations || settings.maxIterations || 12;
   const temperature = agent?.temperature ?? 0.2;
   let totalIn = 0, totalOut = 0, totalCost = 0;
 
-  const stage = repo ? new Stage(repo.branch) : null;
+  // Staging externo = todos os agentes do run enxergam as escritas uns dos outros.
+  const stage = externalStage || (repo ? new Stage(repo.branch) : null);
   const commits = [];
   const ctx = {
     repo,
     stage,
-    treeCache: new Map(),
+    // Cache de árvore compartilhado evita cada agente refazer o mesmo list_repo_tree.
+    treeCache: overrides.treeCache || new Map(),
     onFileChange: (info) => onEvent?.({ type: 'file_change', ...info }),
     flush: (reason) => flushStage(reason),
   };
@@ -93,6 +105,18 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
   // Fecha o staging: um commit por branch tocada.
   async function flushStage(reason) {
     if (!stage || !stage.size) return [];
+    // No modo orquestrado nenhum caminho pode commitar por dentro — nem via
+    // ferramenta (open_pr chama ctx.flush). Quem commita é o Orchestrator, a
+    // partir de ação do usuário. Travado aqui e não só na allowlist do agente.
+    if (orchestrated) {
+      onEvent?.({
+        type: 'commit_skipped',
+        count: stage.size,
+        files: stage.pending.map(e => e.path),
+        reason: 'modo equipe: o commit é decidido pelo usuário ao final',
+      });
+      return [];
+    }
     const [owner, repoName] = repo.fullName.split('/');
     const groups = stage.byBranch();
     const done = [];
@@ -133,6 +157,14 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
   let stopReason = 'done';
 
   for (let i = 0; i < maxIter; i++) {
+    // Cancelamento (timeout do supervisor ou usuário parando o run): sai entre
+    // iterações, sem abortar uma escrita no meio.
+    if (signal?.aborted) {
+      stopReason = 'cancelled';
+      onEvent?.({ type: 'cancelled', reason: signal.reason || 'cancelado' });
+      break;
+    }
+
     if (budget.monthlyUSD > 0) {
       const spent = await monthSpent();
       if (spent >= budget.monthlyUSD) {
@@ -207,7 +239,9 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
   }
 
   // --- Commit automático do que sobrou no staging.
-  if (stage?.size) {
+  // No modo orquestrado quem decide é o Orchestrator (e o usuário): o agente
+  // individual nunca commita, senão cada um faria um commit parcial.
+  if (stage?.size && !orchestrated) {
     if (autoCommit && stopReason !== 'error' && stopReason !== 'budget') {
       try {
         await flushStage('fim do turno');
