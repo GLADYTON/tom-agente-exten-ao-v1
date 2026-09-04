@@ -1,6 +1,6 @@
 import { el, clear, renderInlineMd, fmtCost, fmtTokens } from '../util/dom.js';
 import { getProviders, getActiveModel, getRepo, getChats, saveChats, getActiveAgent, getActiveChatId, setActiveChatId } from '../storage.js';
-import { runAgent } from '../agent/loop.js';
+import { AgentRunner } from '../runner.js';
 
 let history = [];
 let currentChatId = null;
@@ -23,7 +23,6 @@ function lookup(providers, ref) {
   return p && m ? { provider: p, model: m } : null;
 }
 
-// Modelo do agente tem prioridade; se o provider dele foi removido, cai no global.
 function resolveModel(providers, agent, globalActive) {
   return lookup(providers, agent?.modelRef)
     || lookup(providers, globalActive)
@@ -34,7 +33,6 @@ function openAgents() {
   if (window._openAgentsPanel) window._openAgentsPanel();
 }
 
-// Header fixo do chat: identidade do agente + botão que abre o painel de agentes.
 function chatHeader(agent) {
   return el('div', { class: 'chat-top-header' }, [
     el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
@@ -51,47 +49,42 @@ function chatHeader(agent) {
   ]);
 }
 
-// Pedido de aprovação humana: renderiza um card com Aprovar / Recusar e resolve
-// a Promise no clique. O loop do agente fica bloqueado esperando essa resposta,
-// então o botão é a única saída — sem timeout, para não commitar por descuido.
-function askApproval(msgsBox, req) {
-  return new Promise((resolve) => {
-    const isDelete = req.kind === 'delete';
+function askApproval(msgsBox, req, resolvePromise) {
+  const isDelete = req.kind === 'delete';
 
-    const fileList = el('ul', { class: 'approval-files' },
-      (req.files || []).map(f => el('li', {}, `${f.action === 'delete' ? '🗑' : '±'} ${f.path}`)));
+  const fileList = el('ul', { class: 'approval-files' },
+    (req.files || []).map(f => el('li', {}, `${f.action === 'delete' ? '🗑' : '±'} ${f.path}`)));
 
-    const approveBtn = el('button', { class: 'btn btn-primary btn-sm' },
-      isDelete ? 'Apagar' : 'Aprovar e commitar');
-    const denyBtn = el('button', { class: 'btn btn-ghost-danger btn-sm' }, 'Recusar');
+  const approveBtn = el('button', { class: 'btn btn-primary btn-sm' },
+    isDelete ? 'Apagar' : 'Aprovar e commitar');
+  const denyBtn = el('button', { class: 'btn btn-ghost-danger btn-sm' }, 'Recusar');
 
-    const card = el('div', { class: 'msg tool approval' }, [
-      el('div', { class: 'role' }, isDelete ? '⚠ confirmar remoção' : '⚠ branch protegida'),
-      el('div', { class: 'approval-body' }, [
-        el('p', {}, isDelete
-          ? `O agente quer apagar um arquivo de ${req.branch}. Isso sai do HEAD e só volta pelo histórico do GitHub.`
-          : `O agente quer commitar ${req.summary}. Nada foi verificado por build ou teste.`),
-        fileList,
-      ]),
-      el('div', { class: 'approval-actions' }, [denyBtn, approveBtn]),
-    ]);
+  const card = el('div', { class: 'msg tool approval' }, [
+    el('div', { class: 'role' }, isDelete ? '⚠ confirmar remoção' : '⚠ branch protegida'),
+    el('div', { class: 'approval-body' }, [
+      el('p', {}, isDelete
+        ? `O agente quer apagar um arquivo de ${req.branch}. Isso sai do HEAD e só volta pelo histórico do GitHub.`
+        : `O agente quer commitar ${req.summary}. Nada foi verificado por build ou teste.`),
+      fileList,
+    ]),
+    el('div', { class: 'approval-actions' }, [denyBtn, approveBtn]),
+  ]);
 
-    function settle(ok) {
-      approveBtn.disabled = true;
-      denyBtn.disabled = true;
-      card.classList.add(ok ? 'approved' : 'denied');
-      card.querySelector('.approval-actions').replaceChildren(
-        el('span', { class: 'field-hint' }, ok ? '✓ aprovado' : '✗ recusado'),
-      );
-      resolve(ok);
-    }
+  function settle(ok) {
+    approveBtn.disabled = true;
+    denyBtn.disabled = true;
+    card.classList.add(ok ? 'approved' : 'denied');
+    card.querySelector('.approval-actions').replaceChildren(
+      el('span', { class: 'field-hint' }, ok ? '✓ aprovado' : '✗ recusado'),
+    );
+    resolvePromise(ok);
+  }
 
-    approveBtn.addEventListener('click', () => settle(true));
-    denyBtn.addEventListener('click', () => settle(false));
+  approveBtn.addEventListener('click', () => settle(true));
+  denyBtn.addEventListener('click', () => settle(false));
 
-    msgsBox.appendChild(card);
-    msgsBox.scrollTop = msgsBox.scrollHeight;
-  });
+  msgsBox.appendChild(card);
+  msgsBox.scrollTop = msgsBox.scrollHeight;
 }
 
 function emptyView(icon, title, text) {
@@ -113,7 +106,6 @@ export async function renderChat(view) {
   shell.appendChild(chatHeader(agent));
   view.appendChild(shell);
 
-  // Estados de bloqueio: sem provider ou sem modelo resolvido.
   if (!providers.length) {
     const box = el('div', { class: 'chat-messages-scroll' });
     box.appendChild(emptyView('🔌', 'Nenhum modelo configurado',
@@ -131,7 +123,6 @@ export async function renderChat(view) {
     return;
   }
 
-  // Barra de contexto: modelo, repo e contadores da sessão.
   const pillsBar = el('div', { class: 'chat-pills-bar' });
   pillsBar.appendChild(el('span', { class: 'pill accent' }, `${provider.name || provider.type} · ${model.label || model.id}`));
   pillsBar.appendChild(repo
@@ -158,12 +149,11 @@ export async function renderChat(view) {
     currentChatId = `chat_${Date.now()}`;
     activeChat = { id: currentChatId, title: 'Nova Conversa', updatedAt: new Date().toISOString(), messages: [] };
     await setActiveChatId(currentChatId);
-    // Não salva no array ainda, só quando tiver a primeira mensagem
   }
 
   history = activeChat.messages || [];
 
-  if (!history.length) {
+  if (!history.length && !AgentRunner.isRunning) {
     msgsBox.appendChild(el('div', { class: 'welcome-box' }, [
       el('div', { class: 'welcome-avatar' }, agent?.emoji || '🤖'),
       el('div', { class: 'welcome-title' }, `Olá, sou o ${agent?.name || 'agente'}`),
@@ -177,7 +167,6 @@ export async function renderChat(view) {
     msgsBox.appendChild(bubble(m.role, el('div', { html: renderInlineMd(m.content || '') })));
   });
 
-  // Área de input.
   const input = el('textarea', {
     class: 'chat-textarea',
     rows: '2',
@@ -197,8 +186,8 @@ export async function renderChat(view) {
   shell.appendChild(inputArea);
 
   async function saveCurrentChat() {
-    const allChats = await getChats();
-    const idx = allChats.findIndex(c => c.id === currentChatId);
+    const chats = await getChats();
+    const idx = chats.findIndex(c => c.id === currentChatId);
     
     const chatObj = {
       id: currentChatId,
@@ -208,11 +197,11 @@ export async function renderChat(view) {
     };
 
     if (idx >= 0) {
-      allChats[idx] = chatObj;
+      chats[idx] = chatObj;
     } else {
-      allChats.unshift(chatObj); // Adiciona no topo
+      chats.unshift(chatObj);
     }
-    await saveChats(allChats);
+    await saveChats(chats);
   }
 
   clearBtn.addEventListener('click', async () => {
@@ -223,119 +212,139 @@ export async function renderChat(view) {
   });
 
   let totalCost = 0, totalTk = 0;
+  let assistantNode = null;
+  let currentToolGroup = null;
+  let toolStats = { read: 0, write: 0, err: 0 };
+
+  function getOrCreateToolGroup() {
+    if (currentToolGroup) return currentToolGroup;
+    
+    const summaryText = el('span', { class: 'tool-summary-text' }, 'Trabalhando nos arquivos...');
+    const toggleBtn = el('button', { class: 'tool-group-toggle' }, 'Ver detalhes');
+    const header = el('div', { class: 'tool-group-header' }, [summaryText, toggleBtn]);
+    const details = el('div', { class: 'tool-group-details', style: 'display: none;' });
+    
+    currentToolGroup = {
+      node: el('div', { class: 'msg tool-group' }, [header, details]),
+      details,
+      summaryText,
+      updateSummary: () => {
+        const parts = [];
+        if (toolStats.read) parts.push(`${toolStats.read} lido${toolStats.read > 1 ? 's' : ''}`);
+        if (toolStats.write) parts.push(`${toolStats.write} editado${toolStats.write > 1 ? 's' : ''}`);
+        if (toolStats.err) parts.push(`${toolStats.err} erro${toolStats.err > 1 ? 's' : ''}`);
+        summaryText.textContent = parts.length ? parts.join(', ') : 'Trabalhando...';
+        if (toolStats.err) summaryText.classList.add('has-error');
+      }
+    };
+
+    toggleBtn.addEventListener('click', () => {
+      const isHidden = details.style.display === 'none';
+      details.style.display = isHidden ? 'flex' : 'none';
+      toggleBtn.textContent = isHidden ? 'Ocultar detalhes' : 'Ver detalhes';
+    });
+
+    if (assistantNode && assistantNode.parentElement) {
+      msgsBox.insertBefore(currentToolGroup.node, assistantNode.parentElement);
+    } else {
+      msgsBox.appendChild(currentToolGroup.node);
+    }
+    return currentToolGroup;
+  }
+
+  // Conecta ao Runner Global
+  const unsubscribe = AgentRunner.subscribe((ev) => {
+    const thinkingHtml = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+
+    if (ev.type === 'start') {
+      sendBtn.disabled = true;
+      msgsBox.querySelector('.welcome-box')?.remove();
+      if (!history.find(m => m.role === 'user' && m.content === ev.text)) {
+        msgsBox.appendChild(bubble('user', el('div', { html: renderInlineMd(ev.text) })));
+      }
+      assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
+      msgsBox.appendChild(bubble('assistant', assistantNode));
+      msgsBox.scrollTop = msgsBox.scrollHeight;
+    } else if (ev.type === 'thinking') {
+      if (!assistantNode) {
+        assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
+        msgsBox.appendChild(bubble('assistant', assistantNode));
+      }
+      assistantNode.className = 'thinking';
+      assistantNode.innerHTML = thinkingHtml;
+      currentToolGroup = null;
+      toolStats = { read: 0, write: 0, err: 0 };
+    } else if (ev.type === 'assistant_text' && ev.text) {
+      if (assistantNode) {
+        assistantNode.className = '';
+        assistantNode.innerHTML = renderInlineMd(ev.text);
+      }
+    } else if (ev.type === 'tool_call') {
+      const group = getOrCreateToolGroup();
+      if (ev.name.includes('read') || ev.name.includes('list')) toolStats.read++;
+      else toolStats.write++;
+      group.updateSummary();
+      
+      group.details.appendChild(el('div', { class: 'tool-item call' }, [
+        el('div', { class: 'tool-name' }, `→ ${ev.name}`),
+        el('pre', {}, fmtArgs(ev.args)),
+      ]));
+    } else if (ev.type === 'tool_result') {
+      const group = getOrCreateToolGroup();
+      group.details.appendChild(el('div', { class: 'tool-item ok' }, [
+        el('div', { class: 'tool-name' }, `✓ ${ev.name}`),
+        el('pre', {}, fmtArgs(ev.result).slice(0, 1000) + (JSON.stringify(ev.result).length > 1000 ? '...' : '')),
+      ]));
+    } else if (ev.type === 'tool_error') {
+      const group = getOrCreateToolGroup();
+      toolStats.err++;
+      group.updateSummary();
+      group.details.appendChild(el('div', { class: 'tool-item err' }, [
+        el('div', { class: 'tool-name' }, `✗ ${ev.name}`),
+        el('div', { class: 'error-banner-inline' }, ev.error),
+      ]));
+    } else if (ev.type === 'usage') {
+      totalTk += (ev.usage.input || 0) + (ev.usage.output || 0);
+      totalCost += ev.cost || 0;
+      tokPill.textContent = fmtTokens(totalTk) + ' tk';
+      costPill.textContent = fmtCost(totalCost);
+    } else if (ev.type === 'error') {
+      if (assistantNode) {
+        assistantNode.className = '';
+        assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, ev.message));
+      }
+    } else if (ev.type === 'retry') {
+      if (assistantNode) {
+        assistantNode.className = '';
+        assistantNode.appendChild(el('div', { class: 'error-banner-inline', style: 'background: var(--warn-soft); color: var(--warn); border-color: var(--warn);' }, ev.message));
+      }
+    } else if (ev.type === 'approval_request') {
+      askApproval(msgsBox, ev.req, ev.resolve);
+    } else if (ev.type === 'done') {
+      sendBtn.disabled = false;
+      history = AgentRunner.history;
+    }
+    
+    msgsBox.scrollTop = msgsBox.scrollHeight;
+  });
+
+  if (AgentRunner.isRunning) {
+    sendBtn.disabled = true;
+  }
+
+  const observer = new MutationObserver((mutations) => {
+    if (!document.body.contains(shell)) {
+      unsubscribe();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
   async function send() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
-    sendBtn.disabled = true;
-
-    msgsBox.querySelector('.welcome-box')?.remove();
-    msgsBox.appendChild(bubble('user', el('div', { html: renderInlineMd(text) })));
-    msgsBox.scrollTop = msgsBox.scrollHeight;
-
-    const thinkingHtml = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
-    const assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
-    msgsBox.appendChild(bubble('assistant', assistantNode));
-
-    // Agrupador de ferramentas do turno atual
-    let currentToolGroup = null;
-    let toolStats = { read: 0, write: 0, err: 0 };
-
-    function getOrCreateToolGroup() {
-      if (currentToolGroup) return currentToolGroup;
-      
-      const summaryText = el('span', { class: 'tool-summary-text' }, 'Trabalhando nos arquivos...');
-      const toggleBtn = el('button', { class: 'tool-group-toggle' }, 'Ver detalhes');
-      const header = el('div', { class: 'tool-group-header' }, [summaryText, toggleBtn]);
-      const details = el('div', { class: 'tool-group-details', style: 'display: none;' });
-      
-      currentToolGroup = {
-        node: el('div', { class: 'msg tool-group' }, [header, details]),
-        details,
-        summaryText,
-        updateSummary: () => {
-          const parts = [];
-          if (toolStats.read) parts.push(`${toolStats.read} lido${toolStats.read > 1 ? 's' : ''}`);
-          if (toolStats.write) parts.push(`${toolStats.write} editado${toolStats.write > 1 ? 's' : ''}`);
-          if (toolStats.err) parts.push(`${toolStats.err} erro${toolStats.err > 1 ? 's' : ''}`);
-          summaryText.textContent = parts.length ? parts.join(', ') : 'Trabalhando...';
-          if (toolStats.err) summaryText.classList.add('has-error');
-        }
-      };
-
-      toggleBtn.addEventListener('click', () => {
-        const isHidden = details.style.display === 'none';
-        details.style.display = isHidden ? 'flex' : 'none';
-        toggleBtn.textContent = isHidden ? 'Ocultar detalhes' : 'Ver detalhes';
-      });
-
-      msgsBox.insertBefore(currentToolGroup.node, assistantNode.parentElement);
-      return currentToolGroup;
-    }
-
-    try {
-      const out = await runAgent({
-        provider, model, agent,
-        userMessage: text,
-        history,
-        onApproval: (req) => askApproval(msgsBox, req),
-        onEvent: (ev) => {
-          if (ev.type === 'thinking') {
-            assistantNode.className = 'thinking';
-            assistantNode.innerHTML = thinkingHtml;
-            // Reseta o grupo a cada iteração do loop para não misturar turnos
-            currentToolGroup = null;
-            toolStats = { read: 0, write: 0, err: 0 };
-          } else if (ev.type === 'assistant_text' && ev.text) {
-            assistantNode.className = '';
-            assistantNode.innerHTML = renderInlineMd(ev.text);
-          } else if (ev.type === 'tool_call') {
-            const group = getOrCreateToolGroup();
-            if (ev.name.includes('read') || ev.name.includes('list')) toolStats.read++;
-            else toolStats.write++;
-            group.updateSummary();
-            
-            group.details.appendChild(el('div', { class: 'tool-item call' }, [
-              el('div', { class: 'tool-name' }, `→ ${ev.name}`),
-              el('pre', {}, fmtArgs(ev.args)),
-            ]));
-          } else if (ev.type === 'tool_result') {
-            const group = getOrCreateToolGroup();
-            group.details.appendChild(el('div', { class: 'tool-item ok' }, [
-              el('div', { class: 'tool-name' }, `✓ ${ev.name}`),
-              el('pre', {}, fmtArgs(ev.result).slice(0, 1000) + (JSON.stringify(ev.result).length > 1000 ? '...' : '')),
-            ]));
-          } else if (ev.type === 'tool_error') {
-            const group = getOrCreateToolGroup();
-            toolStats.err++;
-            group.updateSummary();
-            group.details.appendChild(el('div', { class: 'tool-item err' }, [
-              el('div', { class: 'tool-name' }, `✗ ${ev.name}`),
-              el('div', { class: 'error-banner-inline' }, ev.error),
-            ]));
-          } else if (ev.type === 'usage') {
-            totalTk += (ev.usage.input || 0) + (ev.usage.output || 0);
-            totalCost += ev.cost || 0;
-            tokPill.textContent = fmtTokens(totalTk) + ' tk';
-            costPill.textContent = fmtCost(totalCost);
-          } else if (ev.type === 'error') {
-            assistantNode.className = '';
-            assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, ev.message));
-          }
-          msgsBox.scrollTop = msgsBox.scrollHeight;
-        },
-      });
-      history = out.messages.filter(mm => mm.role !== 'system');
-      await saveChats([{ messages: history }]);
-    } catch (e) {
-      assistantNode.className = '';
-      clear(assistantNode);
-      assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, e.message));
-    } finally {
-      sendBtn.disabled = false;
-      msgsBox.scrollTop = msgsBox.scrollHeight;
-    }
+    AgentRunner.start(text);
   }
 
   sendBtn.addEventListener('click', send);
