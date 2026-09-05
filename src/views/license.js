@@ -28,6 +28,7 @@ export async function renderLicense(view) {
         el('div', { class: 'active-repo-info' }, [
           el('div', { class: 'active-repo-title' }, 'Licença ativa'),
           el('div', { class: 'active-repo-meta' }, [
+            el('span', {}, `Plano: ${status.plan || 'Não informado'}`),
             el('span', {}, `Expira em: ${date(status.expiresAt)}`),
             el('span', {}, `Dispositivo atual: ${status.deviceName}`),
           ]),

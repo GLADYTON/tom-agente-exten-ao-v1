@@ -46,11 +46,11 @@ export async function getOrCreateDeviceId() {
 }
 
 export async function getLicenseStatus() {
-  const [licenseKey, deviceId, expiresAt, isActivated, lastValidation] = await Promise.all([
+  const [licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan] = await Promise.all([
     get(KEYS.licenseKey, ''), getOrCreateDeviceId(), get(KEYS.expirationDate, ''),
-    get(KEYS.isActivated, false), get(KEYS.lastValidation, 0),
+    get(KEYS.isActivated, false), get(KEYS.lastValidation, 0), get('tom.license_plan', ''),
   ]);
-  return { licenseKey, deviceId, expiresAt, isActivated, lastValidation, deviceName: navigator.userAgent };
+  return { licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan, deviceName: navigator.userAgent };
 }
 
 async function request(url, body) {
@@ -100,6 +100,7 @@ export async function validateLicense(licenseKey) {
     [KEYS.isActivated]: valid,
     [KEYS.lastValidation]: Date.now(),
     [KEYS.expirationDate]: valid ? (result.expires_at || '') : '',
+    ['tom.license_plan']: valid ? (result.plan || result.plan_name || result.tier || '') : '',
     ...(valid ? { [KEYS.licenseKey]: key } : {}),
   });
   return valid;
