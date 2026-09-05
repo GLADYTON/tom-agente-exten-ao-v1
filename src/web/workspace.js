@@ -193,6 +193,7 @@ export class WorkspaceView {
     if (this.activeRightTab === 'preview') {
       const previewBox = el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column' } });
       this.preview = new WebPreview(previewBox, {
+        previewUrl: this.repo?.previewUrl || '',
         onFixWithAI: (err) => {
           this.activeRightTab = 'chat';
           this.renderRightPanel(container);

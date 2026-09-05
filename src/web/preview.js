@@ -50,6 +50,14 @@ export class WebPreview {
   render() {
     clear(this.container);
 
+    const device = el('select', { class: 'select-field preview-device-select' }, [
+      el('option', { value: 'desktop' }, 'PC'),
+      el('option', { value: 'tablet' }, 'Tablet'),
+      el('option', { value: 'mobile' }, 'Mobile'),
+    ]);
+    const openButton = el('button', { class: 'btn btn-ghost btn-sm', onclick: () => {
+      if (this.previewUrl) window.open(this.previewUrl, '_blank', 'noopener');
+    } }, 'Abrir');
     const nav = el('div', { class: 'preview-navbar' }, [
       el('button', {
         class: 'btn btn-ghost btn-sm',
@@ -61,8 +69,18 @@ export class WebPreview {
         value: 'http://localhost:3000 (Live Preview)',
         readonly: true,
       }),
-      el('span', { class: 'badge badge-ok' }, 'live'),
+      el('span', { class: 'badge badge-ok' }, this.previewUrl ? 'container live' : 'local'),
+      device,
+      openButton,
     ]);
+
+    device.addEventListener('change', () => {
+      const sizes = { desktop: ['100%', '100%'], tablet: ['768px', '1024px'], mobile: ['390px', '844px'] };
+      const [width, height] = sizes[device.value];
+      this.iframe.style.width = width;
+      this.iframe.style.height = height;
+      this.iframe.parentElement.style.alignItems = device.value === 'desktop' ? 'stretch' : 'center';
+    });
 
     const previewBox = el('div', { class: 'preview-container' });
     this.iframe = el('iframe', { class: 'preview-iframe', sandbox: 'allow-scripts allow-same-origin' });
