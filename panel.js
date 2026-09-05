@@ -7,7 +7,7 @@ import { renderUsage } from './src/views/usage.js';
 import { renderLicense } from './src/views/license.js';
 import { renderAgentsPanel } from './src/views/agents.js';
 import { getActiveModel, getProviders, getGithub, getRepo, getActiveAgent } from './src/storage.js';
-import { getLicenseStatus, requireLicense } from './src/license.js';
+import { getLicenseStatus, requireLicense, validateLicense } from './src/license.js';
 
 const VIEWS = {
   chat: renderChat,
@@ -36,20 +36,42 @@ function showLicenseGate(message) {
   licenseGate.innerHTML = '';
   const card = document.createElement('div');
   card.className = 'license-gate-card';
-  card.innerHTML = `<div class="license-gate-icon">🔒</div><h2>Licença necessária</h2><p>${message}</p>`;
-  const button = document.createElement('button');
-  button.className = 'btn btn-primary';
-  button.textContent = 'Ativar Licença';
-  button.addEventListener('click', () => { licenseGate.remove(); licenseGate = null; switchTo('license'); });
-  card.appendChild(button);
+  card.append(
+    Object.assign(document.createElement('div'), { className: 'license-gate-icon', textContent: '🔒' }),
+    Object.assign(document.createElement('h2'), { textContent: 'Ative sua licença' }),
+    Object.assign(document.createElement('p'), { textContent: message }),
+  );
+  const input = Object.assign(document.createElement('input'), {
+    className: 'input-field', placeholder: 'XXXX-XXXX-XXXX-XXXX', maxLength: 19,
+  });
+  input.addEventListener('input', () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16).replace(/(.{4})/g, '$1-').replace(/-$/, '');
+  });
+  const error = document.createElement('div');
+  const button = Object.assign(document.createElement('button'), { className: 'btn btn-primary', textContent: 'Ativar Licença' });
+  button.addEventListener('click', async () => {
+    if (!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/.test(input.value)) {
+      error.className = 'error-banner-inline'; error.textContent = 'Use formato XXXX-XXXX-XXXX-XXXX.'; return;
+    }
+    button.disabled = true; button.textContent = 'Validando...'; error.textContent = '';
+    try {
+      if (!(await validateLicense(input.value))) throw new Error('Key inválida, expirada ou revogada.');
+      licenseGate.remove(); licenseGate = null; switchTo('chat');
+    } catch (err) {
+      error.className = 'error-banner-inline'; error.textContent = err.message;
+      button.disabled = false; button.textContent = 'Ativar Licença';
+    }
+  });
+  card.append(input, error, button);
   licenseGate.appendChild(card);
 }
 
 async function enforceLicenseGate() {
   const status = await getLicenseStatus();
-  if (!status.licenseKey) return showLicenseGate('Ative licença para usar CodeForge.');
+  if (!status.licenseKey) return showLicenseGate('Informe key válida no servidor Supabase.');
   const valid = await requireLicense();
-  if (!valid) showLicenseGate('Licença inválida, expirada ou servidor indisponível.');
+  if (!valid) return showLicenseGate('Key inválida, expirada, revogada ou servidor indisponível.');
+  if (licenseGate) { licenseGate.remove(); licenseGate = null; }
 }
 
 async function refreshStatus() {
