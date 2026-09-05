@@ -4,6 +4,7 @@ import { renderRepos } from './src/views/repos.js';
 import { renderChatHistory } from './src/views/chat-history.js';
 import { renderConfig } from './src/views/config.js';
 import { renderUsage } from './src/views/usage.js';
+import { renderLicense } from './src/views/license.js';
 import { renderAgentsPanel } from './src/views/agents.js';
 import { getActiveModel, getProviders, getGithub, getRepo, getActiveAgent } from './src/storage.js';
 
@@ -14,6 +15,7 @@ const VIEWS = {
   history: (view) => renderChatHistory(view, () => switchTo('chat')),
   config: renderConfig,
   usage: renderUsage,
+  license: renderLicense,
 };
 
 // O chat controla seu próprio espaçamento interno, então a view fica sem padding.

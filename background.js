@@ -3,6 +3,7 @@ import { Orchestrator } from './src/agent/orchestrator.js';
 import {
   getProviders, getActiveModel, getActiveAgent, getChats, saveChats, getActiveChatId, getRepo, getSettings
 } from './src/storage.js';
+import { requireLicense } from './src/license.js';
 
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
@@ -29,6 +30,10 @@ async function broadcast(ev) {
 
 async function startAgentExecution({ text, teamMode }) {
   if (isRunning) return;
+  if (!(await requireLicense())) {
+    await broadcast({ type: 'error', message: 'Licença inválida ou expirada. Abra Licença para ativar.' });
+    return;
+  }
   isRunning = true;
   currentEvents = [];
   abortController = new AbortController();
