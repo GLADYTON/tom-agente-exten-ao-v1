@@ -1,8 +1,9 @@
 import { el, clear } from '../util/dom.js';
 
 export class WebPreview {
-  constructor(container, { onFixWithAI }) {
+  constructor(container, { onFixWithAI, previewUrl = '' }) {
     this.container = container;
+    this.previewUrl = previewUrl;
     this.onFixWithAI = onFixWithAI;
     this.filesMap = new Map(); // path -> content
     this.iframe = null;
@@ -32,6 +33,10 @@ export class WebPreview {
 
   reload() {
     if (!this.iframe) return;
+    if (this.previewUrl) {
+      this.iframe.src = this.previewUrl;
+      return;
+    }
     const html = this.bundle();
     if (!html) {
       this.iframe.srcdoc = '<main style="font:16px system-ui;padding:32px">Projeto sem <code>index.html</code>. Execute Preview pelo ambiente de execução real.</main>';

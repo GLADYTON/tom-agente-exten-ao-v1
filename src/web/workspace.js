@@ -47,7 +47,6 @@ export class WorkspaceView {
       el('button', { class: 'subtab-btn', onclick: () => this.showBottom(bottomPanel, 'console') }, 'Console'),
       el('button', { class: 'subtab-btn', onclick: () => this.showBottom(bottomPanel, 'problems') }, 'Problems'),
     ]);
-    workspace.appendChild(bottomPanel);
     const saveState = el('span', { class: 'workspace-save-state badge badge-ok' }, 'Saved');
     const projectHeader = el('header', { class: 'project-editor-header' }, [
       el('button', { class: 'btn btn-ghost btn-sm', onclick: () => { window.location.hash = '#dashboard'; } }, '← Voltar'),
@@ -118,6 +117,7 @@ export class WorkspaceView {
     workspace.appendChild(leftPanel);
     workspace.appendChild(centerPanel);
     workspace.appendChild(rightPanel);
+    workspace.appendChild(bottomPanel);
     const statusBar = el('footer', { class: 'project-editor-statusbar' }, [
       el('span', {}, this.repo?.branch || 'main'),
       el('span', {}, 'TypeScript / JavaScript'),
