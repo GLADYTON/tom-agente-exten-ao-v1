@@ -4,7 +4,7 @@ import { WorkspaceView } from './workspace.js';
 import { renderGithub } from '../views/github.js';
 import { renderLicense } from '../views/license.js';
 import { renderConfig } from '../views/config.js';
-import { getRepo, getGithub } from '../storage.js';
+import { getRepo, getGithub, saveProject } from '../storage.js';
 import { getLicenseStatus } from '../license.js';
 import { syncService } from '../backend/index.js';
 
@@ -90,6 +90,10 @@ export class WebApp {
         el('span', { class: 'sidebar-nav-icon' }, '🏠'),
         el('span', {}, 'Dashboard'),
       ]),
+      el('a', { class: 'sidebar-nav-item', 'data-route': 'projects', href: '#projects' }, [
+        el('span', { class: 'sidebar-nav-icon' }, '📁'),
+        el('span', {}, 'Projetos'),
+      ]),
       el('a', { class: 'sidebar-nav-item', 'data-route': 'workspace', href: '#workspace' }, [
         el('span', { class: 'sidebar-nav-icon' }, '💻'),
         el('span', {}, 'Workspace IDE'),
@@ -130,12 +134,16 @@ export class WebApp {
 
     this.repo = await getRepo();
 
-    if (this.currentView === 'dashboard') {
+    if (this.currentView === 'projects') {
+      const dash = new DashboardView(main, { onOpenProject: () => { window.location.hash = '#workspace'; }, onCreateNewProject: async (text) => { await saveProject({ name: text.slice(0, 48), description: text, source: 'ai' }); window.location.hash = '#workspace'; } });
+      dash.render();
+    } else if (this.currentView === 'dashboard') {
       const dash = new DashboardView(main, {
         onOpenProject: (repo) => {
           window.location.hash = '#workspace';
         },
-        onCreateNewProject: (promptText) => {
+        onCreateNewProject: async (promptText) => {
+          if (typeof promptText === 'string') await saveProject({ name: promptText.slice(0, 48), description: promptText, source: 'ai' });
           window.location.hash = '#workspace';
         },
       });

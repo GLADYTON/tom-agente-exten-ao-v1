@@ -241,6 +241,25 @@ export async function setRepo(v) {
   await set(KEYS.repo, v);
 }
 
+// Projetos locais agrupam metadados sem quebrar formato legado tom.repo.
+export async function getProjects() {
+  return get('tom.projects', []);
+}
+
+export async function saveProject(project) {
+  const list = await getProjects();
+  const next = { id: project.id || `project_${Date.now()}`, updatedAt: new Date().toISOString(), ...project };
+  const index = list.findIndex(item => item.id === next.id);
+  if (index >= 0) list[index] = { ...list[index], ...next };
+  else list.unshift(next);
+  await set('tom.projects', list);
+  return next;
+}
+
+export async function removeProject(id) {
+  await set('tom.projects', (await getProjects()).filter(project => project.id !== id));
+}
+
 export async function getUsage() {
   return get(KEYS.usage, {});
 }
