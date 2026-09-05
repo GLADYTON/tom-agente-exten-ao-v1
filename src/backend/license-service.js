@@ -1,4 +1,4 @@
-import { getLicenseStatus, validateLicense } from '../license.js';
+import { getLicenseStatus, validateLicense, applyLicenseResult } from '../license.js';
 import { backendClient } from './client.js';
 
 export class LicenseService {
@@ -8,9 +8,7 @@ export class LicenseService {
     const result = await backendClient.request('/extension/license/validate', {
       method: 'POST', body: { license_key: key || status.licenseKey, device_id: status.deviceId },
     });
-    if (!result.valid) return false;
-    await validateLicense(key || status.licenseKey);
-    return true;
+    return applyLicenseResult(key || status.licenseKey, result);
   }
   status() { return getLicenseStatus(); }
 }

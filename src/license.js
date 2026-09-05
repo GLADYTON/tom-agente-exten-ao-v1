@@ -77,6 +77,20 @@ async function request(url, body) {
   return response.json();
 }
 
+export async function applyLicenseResult(licenseKey, result) {
+  const key = (licenseKey || '').trim().toUpperCase();
+  const valid = result?.valid === true;
+  await chrome.storage.local.set({
+    [KEYS.isActivated]: valid,
+    [KEYS.lastValidation]: Date.now(),
+    [KEYS.expirationDate]: valid ? (result.expires_at || result.expiresAt || '') : '',
+    ['tom.license_plan']: valid ? (result.plan || result.plan_name || result.tier || '') : '',
+    [KEYS.licenseId]: valid ? (result.license_id || result.licenseId || '') : '',
+    ...(valid && key ? { [KEYS.licenseKey]: key } : {}),
+  });
+  return valid;
+}
+
 export async function validateLicense(licenseKey) {
   const config = await getLicenseConfig();
   const key = (licenseKey || await get(KEYS.licenseKey, '')).trim().toUpperCase();
