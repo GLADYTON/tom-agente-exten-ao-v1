@@ -8,7 +8,7 @@ const KEYS = {
 };
 
 const DEFAULT_CONFIG = {
-  validateUrl: '',
+  validateUrl: 'https://rrsehmxgvhomvxopjhcd.supabase.co/functions/v1/validate-license',
   deactivateUrl: '',
   purchaseUrl: '',
   renewUrl: '',
