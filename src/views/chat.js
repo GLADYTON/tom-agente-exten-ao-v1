@@ -43,19 +43,6 @@ function chatHeader(agent, teamMode, onModeChange) {
   return el('div', { class: 'chat-top-header' }, [
     teamMode
       ? el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
-          el('span', { class: 'chat-agent-name' }, agent?.name || 'Agente'),
-          el('span', { class: 'chat-agent-mode' }, 'Equipe'),
-        ])
-      : el('div', { class: 'chat-agent-info' }, [
-          el('span', { class: 'chat-agent-name' }, agent?.name || 'Agente'),
-          el('span', { class: 'chat-agent-mode' }, 'Solo'),
-        ]),
-    modeToggle(teamMode, onModeChange),
-  ]);
-}
-  return el('div', { class: 'chat-top-header' }, [
-    teamMode
-      ? el('div', { class: 'chat-agent-info', title: 'Gerenciar agentes', onclick: openAgents }, [
         el('span', { class: 'chat-agent-emoji' }, '👥'),
         el('span', { class: 'chat-agent-name' }, 'Equipe'),
         el('span', { class: 'chat-agent-badge' }, '3 agentes'),
