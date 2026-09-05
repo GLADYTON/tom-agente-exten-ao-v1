@@ -1,8 +1,10 @@
 // Arquivo de validação de carregamento dos módulos principais
-import './src/views/chat.js';
-import './src/views/github.js';
-import './src/views/repos.js';
-import './src/views/config.js';
-import './src/views/usage.js';
-import './src/views/agents.js';
-import './src/views/chat-history.js';
+import './views/chat.js';
+import './views/github.js';
+import './views/repos.js';
+import './views/config.js';
+import './views/usage.js';
+import './views/agents.js';
+import './views/chat-history.js';
+import './backend/index.js';
+

@@ -1,6 +1,22 @@
 import { remoteConfigService } from './remote-config-service.js';
+
 export class SkillService {
-  async list() { return (await remoteConfigService.cached())?.skills?.filter(s => s.enabled !== false) || []; }
-  async isAvailable(id) { return (await this.list()).some(s => s.id === id || s.slug === id); }
+  async list() {
+    const config = await remoteConfigService.cached();
+    const skills = config?.skills || [];
+    return skills.filter(s => s.enabled !== false);
+  }
+
+  async get(idOrSlug) {
+    const skills = await this.list();
+    return skills.find(s => s.id === idOrSlug || s.slug === idOrSlug) || null;
+  }
+
+  async isAvailable(idOrSlug) {
+    const skill = await this.get(idOrSlug);
+    return !!skill;
+  }
 }
+
 export const skillService = new SkillService();
+

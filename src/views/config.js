@@ -10,6 +10,8 @@ import {
   getBudget, setBudget,
   getSettings, setSettings,
 } from '../storage.js';
+import { BACKEND_BASE_URL, modelService } from '../backend/index.js';
+
 
 const CREDENTIAL_TYPES = [
   { id: 'static_key', label: 'Chave de API estática' },
@@ -699,61 +701,88 @@ function providerRow(p, onDelete, onEdit) {
 
 export async function renderConfig(view) {
   clear(view);
-  const [providers, active, budget, settings] = await Promise.all([
-    getProviders(), getActiveModel(), getBudget(), getSettings(),
+  const [providers, active, budget, settings, remoteModels] = await Promise.all([
+    getProviders(), getActiveModel(), getBudget(), getSettings(), modelService.list(),
   ]);
+
+  const isBackendManaged = !!BACKEND_BASE_URL;
 
   // Cabeçalho da página
   const pageHeader = el('div', { class: 'page-header' }, [
     el('div', {}, [
       el('h2', { class: 'page-title' }, 'Modelos de IA & Configurações'),
-      el('p', { class: 'page-desc' }, 'Gerencie gateways de inferência, provedores de IA e preferências de execução.'),
+      el('p', { class: 'page-desc' }, isBackendManaged
+        ? 'Gerencie o modelo padrão global e suas preferências de execução da extensão.'
+        : 'Gerencie gateways de inferência, provedores de IA e preferências de execução.'),
     ]),
   ]);
   view.appendChild(pageHeader);
 
   // --- SEÇÃO 1: Provedores configurados
   const providersCard = el('div', { class: 'config-card' });
-  providersCard.appendChild(el('div', { class: 'section-title-row' }, [
-    el('div', {}, [
-      el('span', { class: 'section-tag' }, 'Provedores Conectados'),
-      el('p', { class: 'section-sub-tag' }, 'Adicione gateways próprios ou provedores para disponibilizar modelos aos agentes.'),
-    ]),
-    el('div', { style: { display: 'flex', gap: '6px' } }, [
-      el('button', {
-        class: 'btn btn-secondary btn-sm',
-        onclick: () => document.body.appendChild(openProviderModal({
-          providers,
-          initialType: getProviderType('custom-gateway'),
-          onDone: () => renderConfig(view),
-        })),
-      }, '+ Gateway Próprio'),
-      el('button', {
-        class: 'btn btn-primary btn-sm',
-        onclick: () => document.body.appendChild(openProviderModal({
-          providers,
-          onDone: () => renderConfig(view),
-        })),
-      }, '+ Adicionar Provedor'),
-    ]),
-  ]));
+  
+  if (isBackendManaged) {
+    providersCard.appendChild(el('div', { class: 'section-title-row' }, [
+      el('div', {}, [
+        el('span', { class: 'section-tag' }, 'Provedores Gerenciados Remotamente'),
+        el('p', { class: 'section-sub-tag' }, 'Os gateways, modelos e permissões são administrados centralmente no backend.'),
+      ]),
+    ]));
+    providersCard.appendChild(el('div', { class: 'active-repo-banner', style: { margin: '8px 0' } }, [
+      el('div', { class: 'active-repo-badge' }, 'MODO ADMINISTRADO'),
+      el('div', { class: 'active-repo-content' }, [
+        el('div', { class: 'active-repo-info' }, [
+          el('div', { class: 'active-repo-title' }, 'Configurações remotas ativas'),
+          el('div', { class: 'active-repo-meta' }, [
+            el('span', {}, 'O cadastro de gateways, modelos e limites de tokens é realizado exclusivamente no painel administrativo.'),
+          ]),
+        ]),
+      ]),
+    ]));
+  } else {
+    providersCard.appendChild(el('div', { class: 'section-title-row' }, [
+      el('div', {}, [
+        el('span', { class: 'section-tag' }, 'Provedores Conectados'),
+        el('p', { class: 'section-sub-tag' }, 'Adicione gateways próprios ou provedores para disponibilizar modelos aos agentes.'),
+      ]),
+      el('div', { style: { display: 'flex', gap: '6px' } }, [
+        el('button', {
+          class: 'btn btn-secondary btn-sm',
+          onclick: () => document.body.appendChild(openProviderModal({
+            providers,
+            initialType: getProviderType('custom-gateway'),
+            onDone: () => renderConfig(view),
+          })),
+        }, '+ Gateway Próprio'),
+        el('button', {
+          class: 'btn btn-primary btn-sm',
+          onclick: () => document.body.appendChild(openProviderModal({
+            providers,
+            onDone: () => renderConfig(view),
+          })),
+        }, '+ Adicionar Provedor'),
+      ]),
+    ]));
+  }
 
-  if (!providers.length) {
+  if (!providers.length && !remoteModels.length) {
     providersCard.appendChild(el('div', { class: 'empty-card', style: { padding: '24px 16px' } }, [
       el('div', { class: 'empty-icon-wrap' }, '🔌'),
       el('h3', { class: 'empty-title' }, 'Nenhum provedor configurado'),
-      el('p', { class: 'empty-text' }, 'Clique nos botões acima para conectar seu gateway próprio ou provedores de IA.'),
+      el('p', { class: 'empty-text' }, isBackendManaged
+        ? 'Aguardando sincronização de modelos remotos com o backend.'
+        : 'Clique nos botões acima para conectar seu gateway próprio ou provedores de IA.'),
     ]));
   } else {
     const stack = el('div', { class: 'providers-stack' });
     providers.forEach(p => stack.appendChild(providerRow(
       p,
-      async () => {
+      isBackendManaged ? null : async () => {
         if (!confirm(`Remover "${p.name || p.type}"?`)) return;
         await removeProvider(p.id);
         renderConfig(view);
       },
-      () => {
+      isBackendManaged ? null : () => {
         document.body.appendChild(openProviderModal({
           providers,
           initialProvider: p,
@@ -776,15 +805,28 @@ export async function renderConfig(view) {
 
   const activeSel = el('select', { class: 'select-field' });
   activeSel.appendChild(el('option', { value: '' }, '— Selecione um modelo padrão —'));
-  for (const p of providers) {
-    for (const m of (p.models || [])) {
-      const val = `${p.id}::${m.id}`;
-      const label = `${p.name || p.type} · ${m.label || m.id}`;
+  
+  if (remoteModels.length > 0) {
+    // Exibe modelos retornados pelo backend
+    for (const rm of remoteModels) {
+      const val = `remote::${rm.id || rm.model_id}`;
+      const label = `${rm.display_name || rm.name || rm.model_id} (${Math.round((rm.context_window || rm.max_tokens || 128000) / 1000)}k ctx)`;
       const attrs = { value: val };
-      if (active && active.providerId === p.id && active.modelId === m.id) attrs.selected = 'selected';
+      if (active && (active.modelId === rm.id || active.modelId === rm.model_id)) attrs.selected = 'selected';
       activeSel.appendChild(el('option', attrs, label));
     }
+  } else {
+    for (const p of providers) {
+      for (const m of (p.models || [])) {
+        const val = `${p.id}::${m.id}`;
+        const label = `${p.name || p.type} · ${m.label || m.id}`;
+        const attrs = { value: val };
+        if (active && active.providerId === p.id && active.modelId === m.id) attrs.selected = 'selected';
+        activeSel.appendChild(el('option', attrs, label));
+      }
+    }
   }
+
   activeSel.addEventListener('change', async () => {
     if (!activeSel.value) { await setActiveModel(null); return; }
     const [providerId, modelId] = activeSel.value.split('::');
@@ -793,11 +835,12 @@ export async function renderConfig(view) {
 
   modelCard.appendChild(el('div', { class: 'form-group' }, [
     activeSel,
-    !providers.length
-      ? el('div', { class: 'field-hint field-hint-warn' }, 'Adicione um provedor acima para liberar opções de modelo.')
+    (!providers.length && !remoteModels.length)
+      ? el('div', { class: 'field-hint field-hint-warn' }, 'Nenhum modelo disponível para seleção.')
       : el('div', { class: 'field-hint' }, 'A alteração tem efeito imediato em todos os agentes com modelo herdado.'),
   ]));
   view.appendChild(modelCard);
+
 
   // --- SEÇÃO 2.5: Fallback Automático
   const fallbackCard = el('div', { class: 'config-card' });
