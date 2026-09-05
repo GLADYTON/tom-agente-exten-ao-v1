@@ -155,7 +155,9 @@ export class WorkspaceView {
           if (this.repo && github.token) {
             try {
               const res = await getFile(this.repo.owner, this.repo.repo, path, this.repo.branch || 'main');
-              this.editor?.openFile(path, res.text || '');
+              const content = res.text || '';
+              this.editor?.openFile(path, content);
+              this.preview?.setFileContent(path, content);
             } catch {
               this.editor?.openFile(path, '');
             }

@@ -24,53 +24,19 @@ export class WebPreview {
   }
 
   bundle() {
-    let indexHtml = this.filesMap.get('index.html') || this.filesMap.get('public/index.html') || null;
-
-    if (!indexHtml) {
-      // Se não houver index.html, constrói uma página sintética combinando arquivos HTML/CSS/JS
-      let cssContent = '';
-      let jsContent = '';
-      let bodyHtml = '<h1>Web Live Preview</h1><p>Aplicação pronta para execução.</p>';
-
-      this.filesMap.forEach((content, path) => {
-        if (path.endsWith('.css')) cssContent += `\n/* ${path} */\n${content}`;
-        else if (path.endsWith('.js') || path.endsWith('.jsx')) jsContent += `\n/* ${path} */\n${content}`;
-        else if (path.endsWith('.html') && !indexHtml) bodyHtml = content;
-      });
-
-      return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>${cssContent}</style>
-</head>
-<body>
-  ${bodyHtml}
-  <script>
-    window.onerror = function(msg, url, line) {
-      window.parent.postMessage({ type: 'PREVIEW_ERROR', error: msg + ' (linha ' + line + ')' }, '*');
-    };
-  </script>
-  <script type="module">${jsContent}</script>
-</body>
-</html>`;
-    }
-
-    // Injeta tratamento de erros no index.html existente
-    const scriptErr = `
-    <script>
-      window.onerror = function(msg, url, line) {
-        window.parent.postMessage({ type: 'PREVIEW_ERROR', error: msg + ' (linha ' + line + ')' }, '*');
-      };
-    </script>`;
-
-    return indexHtml.replace('<head>', '<head>' + scriptErr);
+    const indexHtml = this.filesMap.get('index.html') || this.filesMap.get('public/index.html');
+    if (!indexHtml) return null;
+    const scriptErr = `<script>window.onerror=function(msg,url,line){window.parent.postMessage({type:'PREVIEW_ERROR',error:msg+' (linha '+line+')'},'*');};</script>`;
+    return indexHtml.includes('<head>') ? indexHtml.replace('<head>', '<head>' + scriptErr) : indexHtml;
   }
 
   reload() {
     if (!this.iframe) return;
     const html = this.bundle();
+    if (!html) {
+      this.iframe.srcdoc = '<main style="font:16px system-ui;padding:32px">Projeto sem <code>index.html</code>. Execute Preview pelo ambiente de execução real.</main>';
+      return;
+    }
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     this.iframe.src = url;
