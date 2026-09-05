@@ -400,27 +400,7 @@ export async function renderChat(view) {
     input.value = '';
     sendBtn.disabled = true;
 
-    msgsBox.querySelector('.welcome-box')?.remove();
-    msgsBox.appendChild(bubble('user', el('div', { html: renderInlineMd(text) })));
-    msgsBox.scrollTop = msgsBox.scrollHeight;
-
-    const thinkingHtml = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
-    const assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
-    msgsBox.appendChild(bubble('assistant', assistantNode));
-
-    try {
-      if (teamMode) {
-        // Import dinâmico para não bloquear o carregamento inicial
-        const { sendTeam } = await import('../agent/orchestrator.js');
-        await sendTeam(text, assistantNode);
-      } else {
-        const { sendSolo } = await import('../agent/loop.js');
-        await sendSolo(text, assistantNode, thinkingHtml);
-      }
-    } finally {
-      sendBtn.disabled = false;
-      msgsBox.scrollTop = msgsBox.scrollHeight;
-    }
+    AgentRunner.start(text, teamMode);
   }
 
   sendBtn.addEventListener('click', send);
