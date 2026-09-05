@@ -72,6 +72,12 @@ export class WebApp {
       ]),
       el('div', { class: 'web-navbar-right' }, [
         el('div', { id: 'web-nav-status' }),
+        el('a', {
+          class: 'btn btn-ghost btn-sm',
+          href: 'http://localhost:8080/admin',
+          target: '_blank',
+          style: { textDecoration: 'none', color: 'var(--accent)' },
+        }, '🛡️ Painel Admin ↗'),
         el('button', {
           class: 'btn btn-secondary btn-sm',
           onclick: () => { window.location.hash = '#workspace'; },
@@ -110,6 +116,10 @@ export class WebApp {
       el('a', { class: 'sidebar-nav-item', 'data-route': 'config', href: '#config' }, [
         el('span', { class: 'sidebar-nav-icon' }, '⚙️'),
         el('span', {}, 'Configurações'),
+      ]),
+      el('a', { class: 'sidebar-nav-item', 'data-route': 'admin', href: 'http://localhost:8080/admin', target: '_blank', title: 'Abrir Centro de Controle Admin' }, [
+        el('span', { class: 'sidebar-nav-icon' }, '🛡️'),
+        el('span', {}, 'Painel Admin ↗'),
       ]),
     ]);
 

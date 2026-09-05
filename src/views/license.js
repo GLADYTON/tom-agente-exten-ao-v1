@@ -14,11 +14,17 @@ export async function renderLicense(view) {
   const box = el('div', { class: 'page-section', style: { maxWidth: '680px', margin: '0 auto' } });
   view.appendChild(box);
 
-  box.appendChild(el('div', { class: 'page-header' }, [
+  box.appendChild(el('div', { class: 'page-header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } }, [
     el('div', {}, [
       el('h2', { class: 'page-title' }, 'Licença & Sincronização Remota'),
       el('p', { class: 'page-desc' }, 'Gerencie sua licença, verifique modelos de IA e skills disponibilizadas pelo backend.'),
     ]),
+    el('a', {
+      class: 'btn btn-secondary btn-sm',
+      href: 'http://localhost:8080/admin/licenses',
+      target: '_blank',
+      style: { textDecoration: 'none' },
+    }, '🛡️ Painel Admin ↗'),
   ]));
 
   const notice = el('div');
