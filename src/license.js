@@ -64,7 +64,16 @@ async function request(url, body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`Servidor de licença ${response.status}`);
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const data = await response.json();
+      detail = data.error || data.message || data.details || '';
+    } catch {
+      try { detail = await response.text(); } catch { /* resposta sem corpo */ }
+    }
+    throw new Error(`Servidor de licença ${response.status}${detail ? `: ${detail}` : ''}`);
+  }
   return response.json();
 }
 
