@@ -41,6 +41,19 @@ export class WorkspaceView {
     await this.loadRepoData();
 
     const workspace = el('div', { class: 'workspace-container' });
+    const saveState = el('span', { class: 'workspace-save-state badge badge-ok' }, 'Saved');
+    const projectHeader = el('header', { class: 'project-editor-header' }, [
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => { window.location.hash = '#dashboard'; } }, '← Voltar'),
+      el('strong', { class: 'project-editor-name' }, this.repo?.fullName || 'Projeto'),
+      saveState,
+      el('div', { class: 'project-editor-modes' }, [
+        el('button', { class: 'btn btn-secondary btn-sm', onclick: () => workspace.classList.remove('preview-focus') }, 'Code'),
+        el('button', { class: 'btn btn-secondary btn-sm', onclick: () => workspace.classList.add('preview-focus') }, 'Preview'),
+        el('button', { class: 'btn btn-secondary btn-sm', onclick: () => workspace.classList.remove('preview-focus') }, 'Split'),
+      ]),
+      el('button', { class: 'btn btn-primary btn-sm', onclick: () => this.terminal?.executeCommand('npm run dev') }, 'Run'),
+    ]);
+    workspace.appendChild(projectHeader);
 
     // 1. COLUNA ESQUERDA (File Explorer & Git Navigation)
     const leftPanel = el('div', { class: 'workspace-left-panel' });
@@ -98,6 +111,13 @@ export class WorkspaceView {
     workspace.appendChild(leftPanel);
     workspace.appendChild(centerPanel);
     workspace.appendChild(rightPanel);
+    const statusBar = el('footer', { class: 'project-editor-statusbar' }, [
+      el('span', {}, this.repo?.branch || 'main'),
+      el('span', {}, 'TypeScript / JavaScript'),
+      el('span', { class: 'workspace-cursor' }, 'Ln 1, Col 1'),
+      el('span', { class: 'badge badge-ok' }, 'GitHub ●'),
+    ]);
+    workspace.appendChild(statusBar);
     this.container.appendChild(workspace);
   }
 
