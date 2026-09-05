@@ -5,7 +5,6 @@ const KEYS = {
   isActivated: 'tom.is_activated',
   lastValidation: 'tom.last_validation',
   config: 'tom.license_config',
-  licenseId: 'tom.license_id',
 };
 
 const DEFAULT_CONFIG = {
@@ -47,11 +46,11 @@ export async function getOrCreateDeviceId() {
 }
 
 export async function getLicenseStatus() {
-  const [licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan, licenseId] = await Promise.all([
+  const [licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan] = await Promise.all([
     get(KEYS.licenseKey, ''), getOrCreateDeviceId(), get(KEYS.expirationDate, ''),
-    get(KEYS.isActivated, false), get(KEYS.lastValidation, 0), get('tom.license_plan', ''),
+    get(KEYS.isActivated, false), get(KEYS.lastValidation, 0), get('tom.license_plan', ''), get(KEYS.licenseId, ''),
   ]);
-  return { licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan, deviceName: navigator.userAgent };
+  return { licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan, licenseId, deviceName: navigator.userAgent };
 }
 
 async function request(url, body) {
@@ -102,6 +101,7 @@ export async function validateLicense(licenseKey) {
     [KEYS.lastValidation]: Date.now(),
     [KEYS.expirationDate]: valid ? (result.expires_at || '') : '',
     ['tom.license_plan']: valid ? (result.plan || result.plan_name || result.tier || '') : '',
+    [KEYS.licenseId]: valid ? (result.license_id || result.licenseId || '') : '',
     ...(valid ? { [KEYS.licenseKey]: key } : {}),
   });
   return valid;
@@ -118,5 +118,5 @@ export async function deactivateLicense() {
   if (config.deactivateUrl && status.licenseKey) {
     await request(config.deactivateUrl, { license_key: status.licenseKey, device_id: status.deviceId });
   }
-  await chrome.storage.local.remove([KEYS.licenseKey, KEYS.expirationDate, KEYS.isActivated, KEYS.lastValidation]);
+  await chrome.storage.local.remove([KEYS.licenseKey, KEYS.licenseId, KEYS.expirationDate, KEYS.isActivated, KEYS.lastValidation]);
 }
