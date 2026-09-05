@@ -45,6 +45,33 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; padding: 0; }
 
+.license-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(8, 11, 18, 0.97);
+  backdrop-filter: blur(8px);
+}
+.license-gate-card {
+  width: min(100%, 360px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 30px 24px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+}
+.license-gate-icon { font-size: 34px; }
+.license-gate-card h2 { color: #fff; font-size: 18px; }
+.license-gate-card p { color: var(--text-dim); margin: 0; }
+
 body {
   background: var(--bg);
   color: var(--text);
