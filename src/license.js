@@ -84,10 +84,16 @@ export async function validateLicense(licenseKey) {
   if (!config.validateUrl) throw new Error('Configure URL de validação da licença.');
 
   const deviceId = await getOrCreateDeviceId();
+  const deviceName = navigator.userAgent;
   const result = await request(config.validateUrl, {
+    // Mantém nomes em snake_case e aliases comuns usados por Edge Functions.
     license_key: key,
+    key,
+    licenseKey: key,
     device_id: deviceId,
-    device_name: navigator.userAgent,
+    deviceId,
+    device_name: deviceName,
+    deviceName,
   });
   const valid = result.valid === true;
   await chrome.storage.local.set({
