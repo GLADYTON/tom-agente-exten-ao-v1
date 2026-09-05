@@ -18,8 +18,20 @@ export class WorkspaceView {
     this.preview = null;
     this.terminal = null;
     this.gitPanel = null;
-    this.activeLeftTab = 'files'; // 'files' | 'git'
-    this.activeRightTab = 'preview'; // 'preview' | 'terminal' | 'chat'
+
+    this.activeMode = 'preview'; // 'preview' | 'code' | 'split'
+    this.activePage = 'Página inicial';
+    this.plusMenuOpen = false;
+    this.history = [
+      { id: '1', title: 'Registra auditoria privada e derivada da sessão no...', active: false },
+      { id: '2', title: 'Remove unused splash state import to avoid start...', active: true },
+    ];
+    this.suggestions = [
+      'Validar pós-deploy no cache',
+      'Adicionar telemetria de falhas',
+      'Melhorar UX do header',
+      'Adicionar suporte a dark mode',
+    ];
   }
 
   async loadRepoData() {
@@ -35,96 +47,205 @@ export class WorkspaceView {
     }
   }
 
-
   async render() {
     clear(this.container);
     await this.loadRepoData();
 
-    const workspace = el('div', { class: 'workspace-container' });
-    const saveState = el('span', { class: 'workspace-save-state badge badge-ok' }, 'Saved');
-    const projectHeader = el('header', { class: 'project-editor-header' }, [
-      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => { window.location.hash = '#dashboard'; } }, '← Voltar'),
-      el('strong', { class: 'project-editor-name' }, this.repo?.fullName || 'Projeto'),
-      saveState,
-      el('div', { class: 'project-editor-modes' }, [
-        el('button', { class: 'btn btn-secondary btn-sm', onclick: () => workspace.classList.remove('preview-focus') }, 'Code'),
-        el('button', { class: 'btn btn-secondary btn-sm', onclick: () => workspace.classList.add('preview-focus') }, 'Preview'),
-        el('button', { class: 'btn btn-secondary btn-sm', onclick: () => workspace.classList.remove('preview-focus') }, 'Split'),
+    const root = el('div', { class: 'lovable-workspace-root' });
+
+    // ==========================================
+    // 1. LOVABLE TOP BAR
+    // ==========================================
+    const topbar = el('header', { class: 'lovable-topbar' }, [
+      // Left group
+      el('div', { class: 'lovable-tb-left' }, [
+        el('button', { class: 'lovable-tb-btn', title: 'Menu', onclick: () => { window.location.hash = '#dashboard'; } }, '☰'),
+        el('div', { class: 'lovable-project-dropdown' }, [
+          el('span', { class: 'lovable-project-name' }, this.repo?.name || 'mercoo erp'),
+          el('span', { class: 'lovable-dropdown-arrow' }, '▾'),
+        ]),
+        el('button', { class: 'lovable-tb-btn', title: 'Histórico' }, '🕒'),
+        el('button', { class: 'lovable-tb-btn', title: 'Alternar Painel' }, '📑'),
       ]),
-      el('button', { class: 'btn btn-primary btn-sm', onclick: () => this.terminal?.executeCommand('npm run dev') }, 'Run'),
-    ]);
-    workspace.appendChild(projectHeader);
 
-    // 1. COLUNA ESQUERDA (File Explorer & Git Navigation)
-    const leftPanel = el('div', { class: 'workspace-left-panel' });
-    const leftNav = el('div', { class: 'subtab-nav', style: { margin: '8px' } }, [
-      el('button', {
-        class: `subtab-btn${this.activeLeftTab === 'files' ? ' is-active' : ''}`,
-        onclick: () => { this.activeLeftTab = 'files'; this.renderLeftPanel(leftContent); },
-      }, '📁 Arquivos'),
-      el('button', {
-        class: `subtab-btn${this.activeLeftTab === 'git' ? ' is-active' : ''}`,
-        onclick: () => { this.activeLeftTab = 'git'; this.renderLeftPanel(leftContent); },
-      }, '🐙 Git'),
-    ]);
+      // Center Pill Controls
+      el('div', { class: 'lovable-tb-center' }, [
+        el('div', { class: 'lovable-mode-pills' }, [
+          el('button', {
+            class: `lovable-pill-btn ${this.activeMode === 'preview' || this.activeMode === 'split' ? 'is-active' : ''}`,
+            onclick: () => this.setMode('preview'),
+          }, [
+            el('span', {}, '🌐'),
+            el('span', {}, 'Visualização'),
+          ]),
+          el('button', {
+            class: `lovable-pill-btn ${this.activeMode === 'code' ? 'is-active' : ''}`,
+            onclick: () => this.setMode('code'),
+            title: 'Código Fonte',
+          }, '📄'),
+          el('button', { class: 'lovable-pill-icon-btn', title: 'Mais opções' }, '⋮'),
+        ]),
 
-    const leftContent = el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column', overflow: 'hidden' } });
-    leftPanel.appendChild(leftNav);
-    leftPanel.appendChild(leftContent);
-    this.renderLeftPanel(leftContent);
+        el('div', { class: 'lovable-preview-tools' }, [
+          el('button', { class: 'lovable-tb-btn', title: 'Desktop' }, '🖥️'),
+          el('button', { class: 'lovable-tb-btn', title: 'Atualizar', onclick: () => this.preview?.reload() }, '🔄'),
+          el('div', { class: 'lovable-page-selector' }, [
+            el('span', {}, this.activePage),
+            el('span', {}, '▾'),
+          ]),
+          el('button', { class: 'lovable-tb-btn', title: 'Abrir em nova aba', onclick: () => window.open(this.preview?.getUrl() || '#', '_blank') }, '↗'),
+        ]),
+      ]),
 
-    // 2. COLUNA CENTRAL (Multi-tab Code Editor)
-    const centerPanel = el('div', { class: 'workspace-center-panel' });
-    this.editor = new CodeEditor(centerPanel, {
-      onSaveFile: async (path, content) => {
-        this.terminal?.log(`Salvando ${path}...`, 'info');
-        this.preview?.setFileContent(path, content);
-      },
-      onChange: (path, content) => {
-        this.preview?.setFileContent(path, content);
-      },
-    });
-    this.editor.render();
-
-    // 3. COLUNA DIREITA (Live Preview / Terminal / Chat de IA)
-    const rightPanel = el('div', { class: 'workspace-right-panel' });
-    const rightNav = el('div', { class: 'subtab-nav', style: { margin: '8px' } }, [
-      el('button', {
-        class: `subtab-btn${this.activeRightTab === 'preview' ? ' is-active' : ''}`,
-        onclick: () => { this.activeRightTab = 'preview'; this.renderRightPanel(rightContent); },
-      }, '🌐 Preview'),
-      el('button', {
-        class: `subtab-btn${this.activeRightTab === 'chat' ? ' is-active' : ''}`,
-        onclick: () => { this.activeRightTab = 'chat'; this.renderRightPanel(rightContent); },
-      }, '🤖 Agente IA'),
-      el('button', {
-        class: `subtab-btn${this.activeRightTab === 'terminal' ? ' is-active' : ''}`,
-        onclick: () => { this.activeRightTab = 'terminal'; this.renderRightPanel(rightContent); },
-      }, '💻 Terminal'),
+      // Right Group
+      el('div', { class: 'lovable-tb-right' }, [
+        el('button', { class: 'lovable-btn-secondary' }, 'Compartilhar'),
+        el('button', { class: 'lovable-btn-primary' }, 'Publicar'),
+      ]),
     ]);
 
-    const rightContent = el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column', overflow: 'hidden' } });
-    rightPanel.appendChild(rightNav);
-    rightPanel.appendChild(rightContent);
-    this.renderRightPanel(rightContent);
+    root.appendChild(topbar);
 
-    workspace.appendChild(leftPanel);
-    workspace.appendChild(centerPanel);
-    workspace.appendChild(rightPanel);
-    const statusBar = el('footer', { class: 'project-editor-statusbar' }, [
-      el('span', {}, this.repo?.branch || 'main'),
-      el('span', {}, 'TypeScript / JavaScript'),
-      el('span', { class: 'workspace-cursor' }, 'Ln 1, Col 1'),
-      el('span', { class: 'badge badge-ok' }, 'GitHub ●'),
-    ]);
-    workspace.appendChild(statusBar);
-    this.container.appendChild(workspace);
+    // ==========================================
+    // 2. MAIN WORKSPACE CONTAINER
+    // ==========================================
+    const mainArea = el('div', { class: 'lovable-main-area' });
+
+    // ------------------------------------------
+    // LEFT PANEL: CHAT & ACTIVITY FEED
+    // ------------------------------------------
+    const leftPanel = el('div', { class: 'lovable-left-panel' });
+    this.renderLeftFeed(leftPanel);
+
+    // ------------------------------------------
+    // RIGHT PANEL: PREVIEW & CODE CANVAS
+    // ------------------------------------------
+    const rightPanel = el('div', { class: 'lovable-right-panel' });
+    this.renderRightCanvas(rightPanel);
+
+    mainArea.appendChild(leftPanel);
+    mainArea.appendChild(rightPanel);
+    root.appendChild(mainArea);
+
+    this.container.appendChild(root);
   }
 
-  renderLeftPanel(container) {
+  setMode(mode) {
+    this.activeMode = mode;
+    this.render();
+  }
+
+  renderLeftFeed(container) {
     clear(container);
-    if (this.activeLeftTab === 'files') {
-      const explorerBox = el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column' } });
+
+    // Activity Feed Cards Container
+    const feed = el('div', { class: 'lovable-feed-container' });
+
+    this.history.forEach(item => {
+      const card = el('div', { class: `lovable-activity-card ${item.active ? 'is-active' : ''}` }, [
+        el('div', { class: 'lovable-card-header' }, [
+          el('span', { class: 'lovable-card-github-icon' }, '🐙'),
+          el('span', { class: 'lovable-card-title' }, item.title),
+        ]),
+        el('div', { class: 'lovable-card-actions' }, [
+          el('button', { class: 'lovable-card-btn' }, 'Detalhes'),
+          el('button', { class: `lovable-card-btn ${item.active ? 'is-active-btn' : ''}` }, item.active ? 'Visualizando prévia' : 'Visualizar'),
+        ]),
+      ]);
+      feed.appendChild(card);
+    });
+
+    container.appendChild(feed);
+
+    // Suggestions Carousel
+    const suggestionsBox = el('div', { class: 'lovable-suggestions-row' });
+    this.suggestions.forEach(sug => {
+      const chip = el('button', {
+        class: 'lovable-suggestion-chip',
+        onclick: () => {
+          const input = container.querySelector('.lovable-prompt-textarea');
+          if (input) { input.value = sug; input.focus(); }
+        },
+      }, sug);
+      suggestionsBox.appendChild(chip);
+    });
+    container.appendChild(suggestionsBox);
+
+    // Prompt Input Card (Floating Bottom Box)
+    const promptCard = el('div', { class: 'lovable-prompt-card' });
+
+    const textarea = el('textarea', {
+      class: 'lovable-prompt-textarea',
+      placeholder: 'Pergunte à Lovable...',
+      rows: '2',
+    });
+
+    // Plus popover menu (Screenshot 1)
+    const plusPopover = el('div', { class: `lovable-plus-popover ${this.plusMenuOpen ? 'is-open' : ''}` }, [
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '⚙️'), el('span', {}, 'Configurações'), el('span', { class: 'shortcut' }, 'Ctrl .')]),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '🎨'), el('span', {}, 'Design system')]),
+      el('div', { class: 'lovable-popover-divider' }),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '🕒'), el('span', {}, 'Histórico')]),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '📖'), el('span', {}, 'Conhecimento')]),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '🐙'), el('span', {}, 'GitHub')]),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '🔌'), el('span', {}, 'Conectores do projeto')]),
+      el('div', { class: 'lovable-popover-divider' }),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '📷'), el('span', {}, 'Capturar tela')]),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '@'), el('span', {}, 'Adicionar referência')]),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '🧩'), el('span', {}, 'Adicionar habilidade')]),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '📎'), el('span', {}, 'Anexar')]),
+      el('div', { class: 'lovable-popover-divider' }),
+      el('button', { class: 'lovable-popover-item' }, [el('span', {}, '❓'), el('span', {}, 'Ajuda ↗')]),
+    ]);
+
+    const toolbar = el('div', { class: 'lovable-prompt-toolbar' }, [
+      el('div', { class: 'lovable-tb-left-tools' }, [
+        el('button', {
+          class: 'lovable-plus-btn',
+          onclick: (e) => {
+            e.stopPropagation();
+            this.plusMenuOpen = !this.plusMenuOpen;
+            plusPopover.classList.toggle('is-open', this.plusMenuOpen);
+          },
+        }, '+'),
+        plusPopover,
+        el('button', { class: 'lovable-mode-dropdown-btn' }, [
+          el('span', {}, 'Construir'),
+          el('span', {}, '▾'),
+        ]),
+      ]),
+
+      el('div', { class: 'lovable-tb-right-tools' }, [
+        el('button', { class: 'lovable-icon-action-btn', title: 'Chat por voz' }, '🎙️'),
+        el('button', {
+          class: 'lovable-send-btn',
+          title: 'Enviar',
+          onclick: () => {
+            const val = textarea.value.trim();
+            if (val) {
+              this.history.unshift({ id: String(Date.now()), title: val, active: true });
+              textarea.value = '';
+              this.renderLeftFeed(container);
+            }
+          },
+        }, '⬆'),
+      ]),
+    ]);
+
+    promptCard.appendChild(textarea);
+    promptCard.appendChild(toolbar);
+
+    container.appendChild(promptCard);
+  }
+
+  renderRightCanvas(container) {
+    clear(container);
+
+    if (this.activeMode === 'code') {
+      const codeWrapper = el('div', { class: 'lovable-code-wrapper' });
+      const explorerBox = el('div', { class: 'lovable-code-sidebar' });
+      const editorBox = el('div', { class: 'lovable-code-main' });
+
       this.explorer = new FileExplorer(explorerBox, {
         onFileSelect: async (path) => {
           const github = await getGithub();
@@ -139,55 +260,37 @@ export class WorkspaceView {
             this.editor?.openFile(path, '');
           }
         },
-        onCreateFile: (name) => {
-          this.treeFiles.push(name);
-          this.explorer?.setTree(this.treeFiles);
-          this.editor?.openFile(name, '');
-        },
       });
       this.explorer.setTree(this.treeFiles);
-      container.appendChild(explorerBox);
-    } else {
-      const gitBox = el('div', { style: { flex: '1', overflowY: 'auto', padding: '8px' } });
-      this.gitPanel = new GitPanel(gitBox, {
-        onCommitAndPush: async (message, files) => {
-          const github = await getGithub();
-          if (this.repo && github.token) {
-            await createCommit(this.repo.owner, this.repo.repo, this.repo.branch || 'main', files, message);
-          }
-        },
-      });
-      this.gitPanel.setData({ repo: this.repo, branches: [{ name: this.repo?.branch || 'main' }], modifiedFiles: [] });
-      container.appendChild(gitBox);
-    }
-  }
 
-  renderRightPanel(container) {
-    clear(container);
-    if (this.activeRightTab === 'preview') {
-      const previewBox = el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column' } });
-      this.preview = new WebPreview(previewBox, {
-        onFixWithAI: (err) => {
-          this.activeRightTab = 'chat';
-          this.renderRightPanel(container);
-        },
+      this.editor = new CodeEditor(editorBox, {
+        onSaveFile: (path, content) => this.preview?.setFileContent(path, content),
       });
-      this.preview.render();
-      container.appendChild(previewBox);
-    } else if (this.activeRightTab === 'chat') {
-      const chatBox = el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column', height: '100%' } });
-      renderChat(chatBox);
-      container.appendChild(chatBox);
+      this.editor.render();
+
+      codeWrapper.appendChild(explorerBox);
+      codeWrapper.appendChild(editorBox);
+      container.appendChild(codeWrapper);
     } else {
-      const terminalBox = el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column' } });
-      this.terminal = new WebTerminal(terminalBox, {
-        onSendErrorToAI: (err) => {
-          this.activeRightTab = 'chat';
-          this.renderRightPanel(container);
-        },
-      });
-      this.terminal.render();
-      container.appendChild(terminalBox);
+      // Preview Mode
+      const previewWrapper = el('div', { class: 'lovable-preview-wrapper' });
+      const previewBox = el('div', { class: 'lovable-preview-canvas' });
+
+      this.preview = new WebPreview(previewBox, {});
+      this.preview.render();
+      previewWrapper.appendChild(previewBox);
+
+      // Floating Bottom Canvas Controls (🎯 T 📎 💬)
+      const floatingTools = el('div', { class: 'lovable-floating-canvas-bar' }, [
+        el('button', { class: 'lovable-canvas-tool-btn', title: 'Inspecionar elemento' }, '🎯'),
+        el('button', { class: 'lovable-canvas-tool-btn', title: 'Editar texto' }, 'T'),
+        el('button', { class: 'lovable-canvas-tool-btn', title: 'Anexar referência' }, '📎'),
+        el('button', { class: 'lovable-canvas-tool-btn', title: 'Adicionar comentário' }, '💬'),
+      ]);
+
+      previewWrapper.appendChild(floatingTools);
+      container.appendChild(previewWrapper);
     }
   }
 }
+
