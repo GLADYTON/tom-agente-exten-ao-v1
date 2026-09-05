@@ -21,7 +21,9 @@ export const AgentRunner = {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === 'BG_AGENT_EVENT') {
         if (msg.event.type === 'start') this.isRunning = true;
-        if (msg.event.type === 'done' || msg.event.type === 'error') this.isRunning = false;
+        if (msg.event.type === 'done' || msg.event.type === 'error' || msg.event.type === 'cancelled') {
+          this.isRunning = false;
+        }
         this.events.push(msg.event);
         this.listeners.forEach(fn => fn(msg.event));
       }
@@ -42,6 +44,13 @@ export const AgentRunner = {
       text,
       teamMode
     });
+  },
+
+  stop() {
+    chrome.runtime.sendMessage({
+      type: 'BG_STOP_AGENT'
+    });
+    this.isRunning = false;
   }
 };
 
