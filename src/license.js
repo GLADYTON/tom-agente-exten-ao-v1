@@ -8,7 +8,7 @@ const KEYS = {
 };
 
 const DEFAULT_CONFIG = {
-  validateUrl: 'https://rrsehmxgvhomvxopjhcd.supabase.co/functions/v1/validate-license',
+  validateUrl: atob('aHR0cHM6Ly9ycnNlaG14Z3Zob212eG9wamhjZC5zdXBhYmFzZS5jby9mdW5jdGlvbnMvdjEv dmFsaWRhdGUtbGljZW5zZQ=='.replace(' ', '')),
   deactivateUrl: '',
   purchaseUrl: '',
   renewUrl: '',

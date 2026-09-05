@@ -1,6 +1,6 @@
 import { el, clear } from '../util/dom.js';
 import {
-  getLicenseConfig, setLicenseConfig, getLicenseStatus, validateLicense, deactivateLicense,
+  getLicenseConfig, getLicenseStatus, validateLicense, deactivateLicense,
 } from '../license.js';
 
 const keyPattern = /^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/;
@@ -63,15 +63,4 @@ export async function renderLicense(view) {
     ]));
   }
 
-  const details = el('details', { style: { marginTop: '24px' } });
-  details.appendChild(el('summary', {}, 'Configuração do servidor de licença'));
-  const validateUrl = el('input', { class: 'input-field', placeholder: 'https://.../api/validate-license', value: config.validateUrl, style: { marginTop: '10px' } });
-  const deactivateUrl = el('input', { class: 'input-field', placeholder: 'URL para remover dispositivo', value: config.deactivateUrl, style: { marginTop: '10px' } });
-  const purchaseUrl = el('input', { class: 'input-field', placeholder: 'URL para comprar licença', value: config.purchaseUrl, style: { marginTop: '10px' } });
-  const renewUrl = el('input', { class: 'input-field', placeholder: 'URL do painel de renovação', value: config.renewUrl, style: { marginTop: '10px' } });
-  details.append(validateUrl, deactivateUrl, purchaseUrl, renewUrl, el('button', { class: 'btn btn-secondary btn-sm', style: { marginTop: '10px' }, onclick: async () => {
-    await setLicenseConfig({ validateUrl: validateUrl.value.trim(), deactivateUrl: deactivateUrl.value.trim(), purchaseUrl: purchaseUrl.value.trim(), renewUrl: renewUrl.value.trim() });
-    show('Configuração salva.');
-  } }, 'Salvar configuração'));
-  box.appendChild(details);
 }
