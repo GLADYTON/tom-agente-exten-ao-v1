@@ -8,6 +8,7 @@ import { renderLicense } from './src/views/license.js';
 import { renderAgentsPanel } from './src/views/agents.js';
 import { getActiveModel, getProviders, getGithub, getRepo, getActiveAgent } from './src/storage.js';
 import { getLicenseStatus, requireLicense, validateLicense } from './src/license.js';
+import { syncService } from './src/backend/index.js';
 
 const VIEWS = {
   chat: renderChat,
@@ -162,6 +163,8 @@ document.getElementById('agents-panel')?.addEventListener('click', (e) => {
 window._openAgentsPanel = openAgentsPanel;
 
 switchTo('chat');
+syncService.start().catch(() => {});
+window.addEventListener('online', () => syncService.sync().catch(() => {}));
 updateLicenseTimer();
 setInterval(updateLicenseTimer, 1000);
 enforceLicenseGate().catch(() => showLicenseGate('Não foi possível validar licença.'));

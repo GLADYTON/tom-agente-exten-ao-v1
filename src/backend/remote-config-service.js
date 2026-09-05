@@ -12,6 +12,6 @@ export class RemoteConfigService {
     await saveRemoteConfig(data);
     return data;
   }
-  cached() { return getRemoteConfig(); }
+  async cached() { return (await getRemoteConfig())?.data || null; }
 }
 export const remoteConfigService = new RemoteConfigService();

@@ -5,6 +5,7 @@ const KEYS = {
   isActivated: 'tom.is_activated',
   lastValidation: 'tom.last_validation',
   config: 'tom.license_config',
+  licenseId: 'tom.license_id',
 };
 
 const DEFAULT_CONFIG = {
@@ -46,7 +47,7 @@ export async function getOrCreateDeviceId() {
 }
 
 export async function getLicenseStatus() {
-  const [licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan] = await Promise.all([
+  const [licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan, licenseId] = await Promise.all([
     get(KEYS.licenseKey, ''), getOrCreateDeviceId(), get(KEYS.expirationDate, ''),
     get(KEYS.isActivated, false), get(KEYS.lastValidation, 0), get('tom.license_plan', ''),
   ]);

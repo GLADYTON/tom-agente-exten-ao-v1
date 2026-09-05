@@ -15,6 +15,7 @@ const KEYS = {
   agents: 'tom.agents',
   activeAgent: 'tom.activeAgent',
   seededGateways: 'tom.seededGateways',
+  remoteConfig: 'tom.remote_config',
 };
 
 const DEFAULT_AGENTS = [
@@ -57,6 +58,18 @@ async function get(key, fallback) {
 
 async function set(key, value) {
   await chrome.storage.local.set({ [key]: value });
+}
+
+export async function getRemoteConfig() {
+  return get(KEYS.remoteConfig, null);
+}
+
+export async function saveRemoteConfig(config) {
+  await set(KEYS.remoteConfig, {
+    data: config,
+    syncedAt: Date.now(),
+    version: config?.version || '',
+  });
 }
 
 export async function getProviders() {
