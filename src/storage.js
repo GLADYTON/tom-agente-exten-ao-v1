@@ -52,13 +52,35 @@ const DEFAULT_AGENTS = [
 ];
 
 async function get(key, fallback) {
-  const res = await chrome.storage.local.get(key);
-  return res[key] === undefined ? fallback : res[key];
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const res = await chrome.storage.local.get(key);
+      return res[key] === undefined ? fallback : res[key];
+    }
+  } catch {}
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === undefined) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
 }
 
 async function set(key, value) {
-  await chrome.storage.local.set({ [key]: value });
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({ [key]: value });
+      return;
+    }
+  } catch {}
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.error('LocalStorage write error:', err);
+  }
 }
+
 
 export async function getRemoteConfig() {
   return get(KEYS.remoteConfig, null);

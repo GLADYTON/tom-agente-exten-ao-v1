@@ -40,9 +40,10 @@ export async function getOrCreateDeviceId() {
   let salt = await get(KEYS.deviceSalt, '');
   if (!salt) {
     salt = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-    await chrome.storage.local.set({ [KEYS.deviceSalt]: salt });
+    await chrome.storage?.local?.set?.({ [KEYS.deviceSalt]: salt });
   }
-  return sha256(`${chrome.runtime.id}:${salt}`);
+  const appId = (typeof chrome !== 'undefined' && chrome.runtime?.id) ? chrome.runtime.id : 'tom-web-ide';
+  return sha256(`${appId}:${salt}`);
 }
 
 export async function getLicenseStatus() {
@@ -54,16 +55,21 @@ export async function getLicenseStatus() {
 }
 
 async function request(url, body) {
-  const origin = new URL(url).origin + '/*';
-  if (!(await chrome.permissions.contains({ origins: [origin] }))) {
-    const granted = await chrome.permissions.request({ origins: [origin] });
-    if (!granted) throw new Error('Permissão para servidor de licença negada.');
-  }
+  try {
+    if (typeof chrome !== 'undefined' && chrome.permissions?.contains) {
+      const origin = new URL(url).origin + '/*';
+      if (!(await chrome.permissions.contains({ origins: [origin] }))) {
+        const granted = await chrome.permissions.request({ origins: [origin] });
+        if (!granted) throw new Error('Permissão para servidor de licença negada.');
+      }
+    }
+  } catch {}
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+
   if (!response.ok) {
     let detail = '';
     try {
