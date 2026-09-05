@@ -25,7 +25,25 @@ const FLUSH_VIEWS = new Set(['chat']);
 const tabs = document.querySelectorAll('.app-tab');
 const view = document.getElementById('view');
 const statusEl = document.getElementById('topbar-status');
+const licenseTimerEl = document.getElementById('topbar-license-timer');
 let licenseGate = null;
+
+function updateLicenseTimer() {
+  getLicenseStatus().then(status => {
+    if (!status.isActivated || !status.expiresAt) {
+      licenseTimerEl.textContent = '';
+      return;
+    }
+    const remaining = Math.max(0, new Date(status.expiresAt).getTime() - Date.now());
+    const totalSeconds = Math.floor(remaining / 1000);
+    const months = Math.floor(totalSeconds / 2592000);
+    const days = Math.floor((totalSeconds % 2592000) / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    licenseTimerEl.textContent = `Licença${status.plan ? ` ${status.plan}` : ''}: ${months}m ${days}d ${hours}h ${minutes}min ${seconds}s`;
+  }).catch(() => { licenseTimerEl.textContent = ''; });
+}
 
 function showLicenseGate(message) {
   if (!licenseGate) {
@@ -76,8 +94,8 @@ async function enforceLicenseGate() {
 
 async function refreshStatus() {
   try {
-    const [providers, active, github, repo, agent] = await Promise.all([
-      getProviders(), getActiveModel(), getGithub(), getRepo(), getActiveAgent(),
+    const [providers, active, repo, agent] = await Promise.all([
+      getProviders(), getActiveModel(), getRepo(), getActiveAgent(),
     ]);
 
     const parts = [];
@@ -91,7 +109,6 @@ async function refreshStatus() {
       parts.push('sem modelo');
     }
 
-    parts.push(github.user ? `@${github.user.login}` : 'sem github');
     if (repo) parts.push(repo.fullName);
 
     statusEl.textContent = parts.join('  ·  ');
@@ -145,5 +162,7 @@ document.getElementById('agents-panel')?.addEventListener('click', (e) => {
 window._openAgentsPanel = openAgentsPanel;
 
 switchTo('chat');
+updateLicenseTimer();
+setInterval(updateLicenseTimer, 1000);
 enforceLicenseGate().catch(() => showLicenseGate('Não foi possível validar licença.'));
 setInterval(() => enforceLicenseGate().catch(() => showLicenseGate('Não foi possível validar licença.')), 5 * 60 * 1000);
