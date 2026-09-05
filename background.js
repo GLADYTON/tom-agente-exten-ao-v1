@@ -4,6 +4,7 @@ import {
   getProviders, getActiveModel, getActiveAgent, getChats, saveChats, getActiveChatId, getRepo, getSettings
 } from './src/storage.js';
 import { requireLicense } from './src/license.js';
+import { syncService, usageService } from './src/backend/index.js';
 
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
@@ -12,6 +13,8 @@ chrome.sidePanel
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
 });
+
+syncService.start().catch(() => {});
 
 // Estado global mantido no Service Worker (Background)
 let isRunning = false;
@@ -64,6 +67,7 @@ async function startAgentExecution({ text, teamMode }) {
         throw new Error('Provedor ou modelo não configurado.');
       }
 
+      const startedAt = Date.now();
       const out = await runAgent({
         provider, model, agent,
         userMessage: text,
@@ -76,6 +80,9 @@ async function startAgentExecution({ text, teamMode }) {
       });
 
       executionHistory = out.messages.filter(m => m.role !== 'system');
+      usageService.record({ request_id: `agent_${startedAt}`, model_id: model.id, gateway_id: provider.id,
+        input_tokens: out.totalIn, output_tokens: out.totalOut, total_tokens: out.totalIn + out.totalOut,
+        response_time_ms: Date.now() - startedAt, status: out.stopReason === 'error' ? 'error' : 'success' });
     }
 
     // Salva o chat atualizado no storage

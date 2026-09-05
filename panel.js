@@ -163,6 +163,11 @@ document.getElementById('agents-panel')?.addEventListener('click', (e) => {
 window._openAgentsPanel = openAgentsPanel;
 
 switchTo('chat');
+syncService.subscribe(() => {
+  refreshStatus();
+  const activeTab = document.querySelector('.app-tab[aria-selected="true"]');
+  if (activeTab) switchTo(activeTab.dataset.view);
+});
 syncService.start().catch(() => {});
 window.addEventListener('online', () => syncService.sync().catch(() => {}));
 updateLicenseTimer();
