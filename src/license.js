@@ -46,6 +46,19 @@ export async function getOrCreateDeviceId() {
   return sha256(`${appId}:${salt}`);
 }
 
+export async function getSavedLicenseKey() {
+  const key = await get(KEYS.licenseKey, '');
+  return (key || '').trim().toUpperCase();
+}
+
+export async function saveLicenseKey(licenseKey) {
+  const key = (licenseKey || '').trim().toUpperCase();
+  if (key) {
+    await chrome.storage.local.set({ [KEYS.licenseKey]: key });
+  }
+  return key;
+}
+
 export async function getLicenseStatus() {
   const [licenseKey, deviceId, expiresAt, isActivated, lastValidation, plan] = await Promise.all([
     get(KEYS.licenseKey, ''), getOrCreateDeviceId(), get(KEYS.expirationDate, ''),

@@ -195,15 +195,48 @@ export async function renderLicense(view) {
 
   } else {
     // Formulário de Ativação da Licença
+    const rememberedKey = (await chrome.storage.local.get('tom.remember_license_key'))?.['tom.remember_license_key'] || '';
+    const initialKey = status.licenseKey || rememberedKey;
+
     const input = el('input', {
       class: 'input-field',
       placeholder: 'XXXX-XXXX-XXXX-XXXX',
       maxlength: '19',
-      value: status.licenseKey,
+      value: initialKey,
     });
     input.addEventListener('input', () => {
       input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16).replace(/(.{4})/g, '$1-').replace(/-$/, '');
     });
+
+    const rememberCheckbox = el('input', {
+      type: 'checkbox',
+      id: 'remember-license-token',
+      checked: true,
+      style: { cursor: 'pointer', accentColor: 'var(--accent, #6366f1)' },
+    });
+
+    const rememberLabel = el('label', {
+      for: 'remember-license-token',
+      style: { fontSize: '12px', color: 'var(--text-mute)', cursor: 'pointer', userSelect: 'none' },
+    }, 'Lembrar token');
+
+    const rememberRow = el('div', {
+      style: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px' },
+    }, [rememberCheckbox, rememberLabel]);
+
+    const saveKeyBtn = el('button', {
+      class: 'btn btn-secondary btn-sm',
+      type: 'button',
+      onclick: async () => {
+        const key = input.value.trim();
+        if (!keyPattern.test(key)) return show('Formato inválido. Use XXXX-XXXX-XXXX-XXXX.', true);
+        await chrome.storage.local.set({
+          'tom.license_key': key,
+          'tom.remember_license_key': key,
+        });
+        show('Licença salva localmente com sucesso!');
+      },
+    }, '💾 Salvar Licença');
 
     const activate = el('button', {
       class: 'btn btn-primary',
@@ -216,6 +249,11 @@ export async function renderLicense(view) {
           if (!(await validateLicense(key))) {
             show('Licença inválida ou expirada.', true);
           } else {
+            if (rememberCheckbox.checked) {
+              await chrome.storage.local.set({ 'tom.remember_license_key': key });
+            } else {
+              await chrome.storage.local.remove('tom.remember_license_key');
+            }
             await syncService.sync().catch(() => {});
             await renderLicense(view);
           }
@@ -231,9 +269,11 @@ export async function renderLicense(view) {
     box.appendChild(el('div', { class: 'modal-box', style: { marginTop: '16px' } }, [
       el('label', { class: 'input-label' }, 'License key'),
       input,
+      rememberRow,
       notice,
-      el('div', { style: { marginTop: '14px', display: 'flex', gap: '10px', alignItems: 'center' } }, [
+      el('div', { style: { marginTop: '14px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' } }, [
         activate,
+        saveKeyBtn,
         config.purchaseUrl ? el('a', { href: config.purchaseUrl, target: '_blank', rel: 'noopener', class: 'btn btn-ghost' }, 'Onde conseguir uma licença?') : null,
       ]),
     ]));

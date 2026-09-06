@@ -46,13 +46,20 @@ function updateLicenseTimer() {
   }).catch(() => { licenseTimerEl.textContent = ''; });
 }
 
-function showLicenseGate(message) {
+async function showLicenseGate(message) {
   if (!licenseGate) {
     licenseGate = document.createElement('div');
     licenseGate.className = 'license-gate';
     document.body.appendChild(licenseGate);
   }
   licenseGate.innerHTML = '';
+
+  const [currentStatus, remembered] = await Promise.all([
+    getLicenseStatus().catch(() => ({})),
+    chrome.storage.local.get('tom.remember_license_key').catch(() => ({})),
+  ]);
+  const initialValue = currentStatus.licenseKey || remembered?.['tom.remember_license_key'] || '';
+
   const card = document.createElement('div');
   card.className = 'license-gate-card';
   card.append(
@@ -61,27 +68,68 @@ function showLicenseGate(message) {
     Object.assign(document.createElement('p'), { textContent: message }),
   );
   const input = Object.assign(document.createElement('input'), {
-    className: 'input-field', placeholder: 'XXXX-XXXX-XXXX-XXXX', maxLength: 19,
+    className: 'input-field', placeholder: 'XXXX-XXXX-XXXX-XXXX', maxLength: 19, value: initialValue,
   });
   input.addEventListener('input', () => {
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16).replace(/(.{4})/g, '$1-').replace(/-$/, '');
   });
+
+  const rememberWrap = document.createElement('div');
+  rememberWrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin:8px 0 4px;font-size:12px;color:var(--text-mute);cursor:pointer;';
+  const rememberCheckbox = Object.assign(document.createElement('input'), {
+    type: 'checkbox', id: 'gate-remember-token', checked: true,
+  });
+  rememberCheckbox.style.cursor = 'pointer';
+  const rememberLabel = Object.assign(document.createElement('label'), {
+    htmlFor: 'gate-remember-token', textContent: 'Lembrar token',
+  });
+  rememberLabel.style.cursor = 'pointer';
+  rememberWrap.append(rememberCheckbox, rememberLabel);
+
   const error = document.createElement('div');
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;width:100%;';
+
+  const saveBtn = Object.assign(document.createElement('button'), {
+    type: 'button', className: 'btn btn-secondary', textContent: '💾 Salvar Licença',
+  });
+  saveBtn.style.flex = '1';
+  saveBtn.addEventListener('click', async () => {
+    if (!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/.test(input.value)) {
+      error.className = 'error-banner-inline'; error.textContent = 'Use formato XXXX-XXXX-XXXX-XXXX.'; return;
+    }
+    await chrome.storage.local.set({
+      'tom.license_key': input.value.trim().toUpperCase(),
+      'tom.remember_license_key': input.value.trim().toUpperCase(),
+    });
+    error.className = 'success-banner'; error.textContent = '✓ Licença salva com sucesso.';
+  });
+
   const button = Object.assign(document.createElement('button'), { className: 'btn btn-primary', textContent: 'Ativar Licença' });
+  button.style.flex = '1';
   button.addEventListener('click', async () => {
     if (!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/.test(input.value)) {
       error.className = 'error-banner-inline'; error.textContent = 'Use formato XXXX-XXXX-XXXX-XXXX.'; return;
     }
     button.disabled = true; button.textContent = 'Validando...'; error.textContent = '';
+    const key = input.value.trim().toUpperCase();
     try {
-      if (!(await validateLicense(input.value))) throw new Error('Key inválida, expirada ou revogada.');
+      if (!(await validateLicense(key))) throw new Error('Key inválida, expirada ou revogada.');
+      if (rememberCheckbox.checked) {
+        await chrome.storage.local.set({ 'tom.remember_license_key': key });
+      } else {
+        await chrome.storage.local.remove('tom.remember_license_key');
+      }
       licenseGate.remove(); licenseGate = null; switchTo('chat');
     } catch (err) {
       error.className = 'error-banner-inline'; error.textContent = err.message;
       button.disabled = false; button.textContent = 'Ativar Licença';
     }
   });
-  card.append(input, error, button);
+
+  btnRow.append(saveBtn, button);
+  card.append(input, rememberWrap, error, btnRow);
   licenseGate.appendChild(card);
 }
 
