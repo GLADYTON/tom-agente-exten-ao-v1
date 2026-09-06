@@ -221,15 +221,13 @@ export async function renderChat(view) {
   history.forEach(m => {
     if (m.role === 'system' || m.role === 'tool') return;
     if (m.role === 'assistant' && !m.content && !m.tool_calls?.length) return;
-    msgsBox.appendChild(bubble(m.role, el('div', { html: renderInlineMd(m.content || '') })));
+    msgsBox.appendChild(bubble(m.role, el('div', { class: 'msg-content-inner', html: renderInlineMd(m.content || '') })));
   });
 
   input.placeholder = `Diga ao ${agent?.name || 'agente'} o que fazer...`;
   input.disabled = false;
   clearBtn.disabled = false;
-  if (!AgentRunner.isRunning) {
-    sendBtn.disabled = false;
-  }
+  sendBtn.disabled = false;
 
   async function saveCurrentChat() {
     const chats = await getChats();
@@ -303,14 +301,20 @@ export async function renderChat(view) {
     const thinkingHtml = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
 
     if (ev.type === 'start') {
-      sendBtn.disabled = true;
       msgsBox.querySelector('.welcome-box')?.remove();
       if (!history.find(m => m.role === 'user' && m.content === ev.text)) {
-        msgsBox.appendChild(bubble('user', el('div', { html: renderInlineMd(ev.text) })));
+        msgsBox.appendChild(bubble('user', el('div', { class: 'msg-content-inner', html: renderInlineMd(ev.text) })));
       }
       assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
       msgsBox.appendChild(bubble('assistant', assistantNode));
       msgsBox.scrollTop = msgsBox.scrollHeight;
+    } else if (ev.type === 'queue_add') {
+      msgsBox.querySelector('.welcome-box')?.remove();
+      const qMsg = el('div', { class: 'queued-msg' }, [
+        el('span', { class: 'queue-icon' }, '⏳ '),
+        el('em', {}, ev.text)
+      ]);
+      msgsBox.appendChild(bubble('user', qMsg));
     } else if (ev.type === 'thinking') {
       if (!assistantNode) {
         assistantNode = el('div', { class: 'thinking', html: thinkingHtml });
@@ -322,10 +326,13 @@ export async function renderChat(view) {
       toolStats = { read: 0, write: 0, err: 0 };
     } else if (ev.type === 'assistant_text' && ev.text) {
       if (assistantNode) {
-        assistantNode.className = '';
+        assistantNode.className = 'msg-content-inner';
         assistantNode.innerHTML = renderInlineMd(ev.text);
       }
     } else if (ev.type === 'tool_call') {
+      if (assistantNode && assistantNode.className === 'thinking') {
+        assistantNode.innerHTML = thinkingHtml + ' <span class="editing-status">Editando códigos...</span>';
+      }
       const group = getOrCreateToolGroup();
       if (ev.name.includes('read') || ev.name.includes('list')) toolStats.read++;
       else toolStats.write++;
@@ -356,27 +363,22 @@ export async function renderChat(view) {
       costPill.textContent = fmtCost(totalCost);
     } else if (ev.type === 'error') {
       if (assistantNode) {
-        assistantNode.className = '';
+        assistantNode.className = 'msg-content-inner';
         assistantNode.appendChild(el('div', { class: 'error-banner-inline' }, ev.message));
       }
     } else if (ev.type === 'retry') {
       if (assistantNode) {
-        assistantNode.className = '';
+        assistantNode.className = 'msg-content-inner';
         assistantNode.appendChild(el('div', { class: 'error-banner-inline', style: 'background: var(--warn-soft); color: var(--warn); border-color: var(--warn);' }, ev.message));
       }
     } else if (ev.type === 'approval_request') {
       askApproval(msgsBox, ev.req, ev.resolve);
     } else if (ev.type === 'done') {
-      sendBtn.disabled = false;
       history = AgentRunner.history;
     }
     
     msgsBox.scrollTop = msgsBox.scrollHeight;
   });
-
-  if (AgentRunner.isRunning) {
-    sendBtn.disabled = true;
-  }
 
   const observer = new MutationObserver((mutations) => {
     if (!document.body.contains(shell)) {
@@ -398,7 +400,10 @@ export async function renderChat(view) {
     }
 
     input.value = '';
+    
+    // Pequeno delay visual para desativar botão e reativar, dando feedback de envio rápido
     sendBtn.disabled = true;
+    setTimeout(() => { sendBtn.disabled = false; }, 200);
 
     AgentRunner.start(text, teamMode);
   }

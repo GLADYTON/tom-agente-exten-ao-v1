@@ -15,6 +15,7 @@ export const AgentRunner = {
   history: [],
   events: [],
   listeners: new Set(),
+  messageQueue: [],
 
   init() {
     try {
@@ -36,6 +37,13 @@ export const AgentRunner = {
             }
             this.events.push(msg.event);
             this.listeners.forEach(fn => fn(msg.event));
+            
+            // Auto-process queue if done
+            if (!this.isRunning && this.messageQueue.length > 0) {
+              const next = this.messageQueue.shift();
+              // Pequeno delay para garantir que a UI tenha tempo de renderizar o done anterior
+              setTimeout(() => this.start(next.text, next.teamMode), 100);
+            }
           }
         });
       }
@@ -54,6 +62,12 @@ export const AgentRunner = {
   },
 
   async start(text, teamMode = false) {
+    if (this.isRunning) {
+      this.messageQueue.push({ text, teamMode });
+      this.emit({ type: 'queue_add', text, queueCount: this.messageQueue.length });
+      return;
+    }
+
     this.isRunning = true;
     this.events = [];
 
@@ -151,6 +165,11 @@ export const AgentRunner = {
       webAbortController = null;
       webOrchestrator = null;
       this.emit({ type: 'done' });
+      
+      if (this.messageQueue.length > 0) {
+        const next = this.messageQueue.shift();
+        setTimeout(() => this.start(next.text, next.teamMode), 100);
+      }
     }
   },
 
