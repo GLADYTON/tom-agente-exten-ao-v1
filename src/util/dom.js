@@ -31,7 +31,11 @@ export function renderInlineMd(text) {
     .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
       `<pre><code class="lang-${lang}">${code}</code></pre>`)
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/^### (.*$)/gim, '<h4 style="margin:8px 0 4px;font-size:14px;color:var(--text, #f1f5f9);">$1</h4>')
+    .replace(/^## (.*$)/gim, '<h3 style="margin:10px 0 6px;font-size:15px;color:var(--text, #f1f5f9);">$1</h3>')
+    .replace(/^# (.*$)/gim, '<h2 style="margin:12px 0 8px;font-size:16px;color:var(--text, #f1f5f9);">$1</h2>')
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^\s*[-*]\s+(.*$)/gim, '<li style="margin-left:18px;margin-bottom:3px;">$1</li>')
     .replace(/\n/g, '<br>');
 }
 
