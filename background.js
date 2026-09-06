@@ -41,18 +41,18 @@ async function startAgentExecution({ text, teamMode }) {
   currentEvents = [];
   abortController = new AbortController();
 
-  currentChatId = await getActiveChatId();
-  const allChats = await getChats();
-  const activeChat = allChats.find(c => c.id === currentChatId);
-  executionHistory = activeChat ? (activeChat.messages || []) : [];
-
-  const [providers, globalActive, agent, repo, settings] = await Promise.all([
-    getProviders(), getActiveModel(), getActiveAgent(), getRepo(), getSettings()
-  ]);
-
-  await broadcast({ type: 'start', text });
-
   try {
+    currentChatId = await getActiveChatId();
+    const allChats = await getChats();
+    const activeChat = allChats.find(c => c.id === currentChatId);
+    executionHistory = activeChat ? (activeChat.messages || []) : [];
+
+    const [providers, globalActive, agent, repo, settings] = await Promise.all([
+      getProviders(), getActiveModel(), getActiveAgent(), getRepo(), getSettings()
+    ]);
+
+    await broadcast({ type: 'start', text });
+
     if (teamMode) {
       currentOrchestrator = new Orchestrator();
       currentOrchestrator.bus.on('*', (ev) => broadcast(ev));

@@ -73,14 +73,15 @@ export const AgentRunner = {
 
     // Se estiver no ambiente de extensão Chrome
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-      try {
-        chrome.runtime.sendMessage({
-          type: 'BG_START_AGENT',
-          text,
-          teamMode
-        });
-        return;
-      } catch {}
+      chrome.runtime.sendMessage({
+        type: 'BG_START_AGENT',
+        text,
+        teamMode
+      }).catch(err => {
+        this.isRunning = false;
+        this.emit({ type: 'error', message: 'Erro de comunicação com o background da extensão. Por favor, feche este painel e abra novamente, ou recarregue a extensão no chrome://extensions.' });
+      });
+      return;
     }
 
     // Fallback: Execução Web direta no navegador
