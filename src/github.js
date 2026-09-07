@@ -141,13 +141,17 @@ export async function listReposForToken(token, perPage = 100) {
 // Um commit para N arquivos, via Git Trees API.
 // files: [{ path, content }] para escrita, [{ path, action: 'delete' }] para remoção.
 // Blobs sobem em paralelo (limitado) porque é a parte lenta quando são muitos arquivos.
-export async function createCommit(owner, repo, branch, files, message) {
+export async function createCommit(owner, repo, branch, files, message, { expectedBaseSha } = {}) {
   if (!files?.length) throw new Error('Nada para commitar.');
+  if (!expectedBaseSha) throw new Error('Commit bloqueado: base SHA esperado ausente.');
   const headers = await authHeaders();
   const jsonHeaders = { ...headers, 'Content-Type': 'application/json' };
 
   const branchData = await getBranch(owner, repo, branch);
   const baseSha = branchData.commit.sha;
+  if (baseSha !== expectedBaseSha) {
+    throw new Error(`A branch ${branch} mudou desde a aprovação. Base SHA esperado ${expectedBaseSha.slice(0, 12)}, atual ${baseSha.slice(0, 12)}. Gere nova aprovação.`);
+  }
   const baseTreeSha = branchData.commit.commit.tree.sha;
 
   async function toTreeEntry(f) {
@@ -189,10 +193,18 @@ export async function createCommit(owner, repo, branch, files, message) {
   if (!commitRes.ok) throw new Error(`Falha ao criar commit: ${commitRes.status} ${(await commitRes.text().catch(() => '')).slice(0, 200)}`);
   const commit = await commitRes.json();
 
+  // Revalida imediatamente antes de mover a ref. GitHub refs não oferece
+  // compare-and-swap neste endpoint; esta checagem reduz a janela TOCTOU e o
+  // servidor ainda rejeita non-fast-forward quando a ref avançou.
+  const beforeUpdate = await getBranch(owner, repo, branch);
+  if (beforeUpdate.commit.sha !== expectedBaseSha) {
+    throw new Error(`A branch ${branch} avançou antes da atualização. Nenhuma ref foi movida; gere nova aprovação.`);
+  }
+
   const refRes = await fetch(`${API}/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
     method: 'PATCH',
     headers: jsonHeaders,
-    body: JSON.stringify({ sha: commit.sha }),
+    body: JSON.stringify({ sha: commit.sha, force: false }),
   });
   if (!refRes.ok) {
     const body = (await refRes.text().catch(() => '')).slice(0, 200);

@@ -16,8 +16,12 @@ export const AgentRunner = {
   events: [],
   listeners: new Set(),
   messageQueue: [],
+  panelConnectionId: null,
+  panelPort: null,
 
   init() {
+    this.connectPanel();
+
     try {
       if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
         chrome.runtime.sendMessage({ type: 'BG_GET_STATUS' }, (res) => {
@@ -126,7 +130,6 @@ export const AgentRunner = {
           history: this.history,
           signal: webAbortController.signal,
           onEvent: (ev) => this.emit(ev),
-          onApproval: async (req) => true,
         });
 
         this.history = out.messages.filter(m => m.role !== 'system');

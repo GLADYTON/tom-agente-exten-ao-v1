@@ -133,7 +133,9 @@ async function doSeedReadyProviders() {
         id: 'p_dgsis_seeded',
         type: type.id,
         name: type.label,
-        apiKey: type.defaultApiKey,
+        // Credenciais nunca vêm do catálogo da extensão. Usuário configura chave
+        // no provider/backend autorizado; nenhum segredo é embutido no bundle.
+        apiKey: '',
         endpoint: type.endpoint,
         authScheme: type.authScheme,
         credentialType: 'static_key',
@@ -308,7 +310,9 @@ export async function getSettings() {
     autoApprove: false,
     maxIterations: 12,
     systemPrompt: '',
-    autoCommit: true,
+    // Commit é sempre ação explícita do usuário; instalações antigas não
+    // podem reativar commit automático por valor legado.
+    autoCommit: false,
     autoReview: true,
     // Modo equipe (multiagente). Desligado por padrão: o modo de agente único
     // continua sendo o caminho conhecido de quem já usa a extensão.

@@ -1,6 +1,15 @@
 import * as gh from '../github.js';
 import { getRepo } from '../storage.js';
 import { normalizePath, diffStats } from './stage.js';
+import {
+  assertRepoBranch,
+  assertTextLimit,
+  assertStageLimits,
+  validateBranchName,
+  validateCommitMessage,
+  validatePullRequest,
+  LIMITS,
+} from './guard.js';
 
 export const TOOL_DEFS = [
   {
@@ -47,7 +56,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'write_file',
-    description: 'Cria um arquivo novo ou substitui o conteúdo inteiro de um existente. Para alterações pontuais em arquivo que já existe, use edit_file. As mudanças entram numa área de staging e são commitadas juntas ao final do turno.',
+    description: 'Cria um arquivo novo ou substitui o conteúdo inteiro de um existente. Para alterações pontuais em arquivo que já existe, use edit_file. As mudanças entram apenas em staging virtual; commit exige ação explícita do usuário.',
     input_schema: {
       type: 'object',
       required: ['path', 'content', 'message'],
@@ -86,7 +95,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'open_pr',
-    description: 'Abre um Pull Request de uma branch para a base. As mudanças pendentes são commitadas automaticamente antes do PR.',
+    description: 'Propõe um Pull Request de uma branch para a base. Commit e abertura do PR exigem aprovações humanas separadas.',
     input_schema: {
       type: 'object',
       required: ['head', 'title'],
@@ -109,6 +118,19 @@ async function requireRepo() {
   const repo = await getRepo();
   if (!repo) throw new Error('Nenhum repositório ativo. Selecione um em Repos.');
   return repo;
+}
+
+function targetBranch(repo, requested) {
+  const branch = assertRepoBranch(repo, requested || repo.branch);
+  validateBranchName(branch, { allowProtected: true });
+  return branch;
+}
+
+function requireApproval(ctx, request) {
+  if (typeof ctx.requestApproval !== 'function') {
+    throw new Error(`Ação ${request.kind} bloqueada: aprovação humana indisponível.`);
+  }
+  return ctx.requestApproval(request);
 }
 
 // Busca o arquivo respeitando o staging: se o agente já escreveu, ele vê a
@@ -143,7 +165,7 @@ export async function runTool(name, args, ctx = {}) {
   const stage = ctx.stage;
 
   if (name === 'list_repo_tree') {
-    const ref = args.ref || branch;
+    const ref = targetBranch(repo, args.ref || branch);
     let items;
     if (ctx.treeCache?.has(ref)) {
       items = ctx.treeCache.get(ref);
@@ -172,7 +194,7 @@ export async function runTool(name, args, ctx = {}) {
   if (name === 'read_file') {
     const list = (args.paths?.length ? args.paths : [args.path]).filter(Boolean).map(normalizePath);
     if (!list.length) throw new Error('Informe "path" ou "paths".');
-    const ref = args.ref || branch;
+    const ref = targetBranch(repo, args.ref || branch);
 
     // Paralelo: ler 8 arquivos custa quase o mesmo que ler 1.
     const results = await Promise.all(list.map(async (p) => {
@@ -199,7 +221,8 @@ export async function runTool(name, args, ctx = {}) {
   if (name === 'edit_file') {
     if (!stage) throw new Error('edit_file indisponível sem área de staging.');
     const p = normalizePath(args.path);
-    const target = args.branch || branch;
+    const target = targetBranch(repo, args.branch || branch);
+    const message = validateCommitMessage(args.message);
     const f = await loadFile(ctx, owner, repoName, p, target);
     if (f.isDir) throw new Error(`${p} é um diretório.`);
     if (!f.existed) throw new Error(`${p} não existe. Use write_file para criar.`);
@@ -217,7 +240,7 @@ export async function runTool(name, args, ctx = {}) {
 
     const content = f.text.slice(0, first) + (args.new_text ?? '') + f.text.slice(first + oldText.length);
     const entry = stage.stageWrite(p, content, {
-      message: args.message,
+      message,
       branch: target,
       original: f.text,
       existed: true,
@@ -231,17 +254,20 @@ export async function runTool(name, args, ctx = {}) {
   if (name === 'write_file') {
     if (!stage) throw new Error('write_file indisponível sem área de staging.');
     const p = normalizePath(args.path);
-    const target = args.branch || branch;
+    const target = targetBranch(repo, args.branch || branch);
+    const message = validateCommitMessage(args.message);
+    const content = assertTextLimit(args.content ?? '', `Conteúdo de ${p}`, LIMITS.maxFileBytes);
     const f = await loadFile(ctx, owner, repoName, p, target);
     if (f.isDir) throw new Error(`${p} é um diretório.`);
 
     const entry = stage.stageWrite(p, args.content ?? '', {
-      message: args.message,
+      message,
       branch: target,
       original: f.text || '',
       existed: !!f.existed,
       sha: f.sha,
     });
+    assertStageLimits(stage.pending);
     const stats = diffStats(entry);
     ctx.onFileChange?.({ path: p, branch: target, ...stats, message: args.message });
     return { staged: true, path: p, branch: target, added: stats.added, removed: stats.removed, created: !f.existed, note: 'Será commitado junto com as outras mudanças ao final do turno.' };
@@ -250,7 +276,8 @@ export async function runTool(name, args, ctx = {}) {
   if (name === 'delete_file') {
     if (!stage) throw new Error('delete_file indisponível sem área de staging.');
     const p = normalizePath(args.path);
-    const target = args.branch || branch;
+    const target = targetBranch(repo, args.branch || branch);
+    const message = validateCommitMessage(args.message);
     const f = await loadFile(ctx, owner, repoName, p, target);
     if (f.isDir) throw new Error(`${p} é um diretório, não um arquivo.`);
     if (!f.existed) throw new Error(`${p} não existe.`);
@@ -259,8 +286,8 @@ export async function runTool(name, args, ctx = {}) {
     // HEAD e o usuário precisaria ir ao histórico do GitHub para recuperar.
     // Arquivo criado neste mesmo turno não conta — descartar isso é inofensivo.
     const createdThisTurn = stage.known(p)?.staged && !stage.files.get(p)?.existed;
-    if (ctx.settings?.confirmDelete !== false && ctx.requestApproval && !createdThisTurn) {
-      const ok = await ctx.requestApproval({
+    if (!createdThisTurn) {
+      const ok = await requireApproval(ctx, {
         kind: 'delete',
         branch: target,
         files: [{ path: p, action: 'delete' }],
@@ -278,7 +305,7 @@ export async function runTool(name, args, ctx = {}) {
     }
 
     const entry = stage.stageDelete(p, {
-      message: args.message,
+      message,
       branch: target,
       original: f.text || '',
       existed: true,
@@ -293,25 +320,45 @@ export async function runTool(name, args, ctx = {}) {
   }
 
   if (name === 'create_branch') {
-    const res = await gh.createBranch(owner, repoName, args.name, args.from || branch);
-    ctx.treeCache?.delete(args.name);
-    return { branch: args.name, ref: res.ref };
+    const newBranch = validateBranchName(args.name, { allowProtected: false, protectedBranches: ctx.settings?.protectedBranches });
+    const fromBranch = targetBranch(repo, args.from || branch);
+    const ok = await requireApproval(ctx, {
+      kind: 'branch',
+      branch: newBranch,
+      fromBranch,
+      summary: `criar branch ${newBranch} a partir de ${fromBranch}`,
+      files: [],
+    });
+    if (!ok) return { created: false, denied: true, branch: newBranch };
+    const res = await gh.createBranch(owner, repoName, newBranch, fromBranch);
+    ctx.treeCache?.delete(newBranch);
+    return { created: true, branch: newBranch, ref: res.ref };
   }
 
   if (name === 'open_pr') {
-    // PR sem commit não mostra nada: fecha o staging primeiro.
-    const flushed = ctx.flush ? await ctx.flush('open_pr') : [];
-    const pr = await gh.openPR(owner, repoName, {
+    const proposal = validatePullRequest({
       head: args.head,
       base: args.base || branch,
       title: args.title,
       body: args.body || '',
+    }, repo, ctx.settings?.protectedBranches);
+    const ok = await requireApproval(ctx, {
+      kind: 'pr',
+      branch: proposal.head,
+      base: proposal.base,
+      title: proposal.title,
+      body: proposal.body,
+      summary: `abrir PR ${proposal.head} → ${proposal.base}: ${proposal.title}`,
+      files: stage?.pending?.map(e => ({ path: e.path, action: e.action })) || [],
     });
-    return {
-      number: pr.number,
-      url: pr.html_url,
-      committed: flushed.map(c => ({ sha: c.sha?.slice(0, 7), branch: c.branch, files: c.count })),
-    };
+    if (!ok) return { opened: false, denied: true, head: proposal.head, base: proposal.base };
+    // Não commita silenciosamente. Se houver staging, commit deve ser aprovado
+    // por request separado antes que o usuário abra o PR.
+    if (stage?.size) {
+      throw new Error('PR bloqueado: existem alterações em staging. Aprove o commit separadamente e tente abrir o PR novamente.');
+    }
+    const pr = await gh.openPR(owner, repoName, proposal);
+    return { opened: true, number: pr.number, url: pr.html_url, head: proposal.head, base: proposal.base };
   }
 
   throw new Error(`Tool desconhecida: ${name}`);

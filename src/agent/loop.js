@@ -1,7 +1,7 @@
 import { callModel, estimateCost, isQuotaError } from '../providers/client.js';
 import { TOOL_DEFS, WRITE_TOOLS, runTool } from './tools.js';
-import { Stage, buildCommitMessage } from './stage.js';
-import { isProtectedBranch, describeCommitRequest } from './guard.js';
+import { Stage, buildCommitMessage, diffStats } from './stage.js';
+import { describeCommitRequest, validateCommitMessage } from './guard.js';
 import * as gh from '../github.js';
 import { addUsage, getSettings, getRepo, getBudget, getUsage, getProviders } from '../storage.js';
 
@@ -56,7 +56,9 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
   const repo = await getRepo();
 
   const orchestrated = !!externalStage;
-  const autoCommit = overrides.autoCommit ?? (settings.autoCommit !== false);
+  // Segurança estrutural: o agente nunca commita por conta própria. O valor
+  // legado autoCommit é ignorado mesmo quando overrides tentam reativá-lo.
+  const autoCommit = false;
   const autoReview = overrides.autoReview ?? (settings.autoReview !== false);
 
   const systemBase = agent?.systemPrompt || settings.systemPrompt || DEFAULT_SYSTEM;
@@ -67,9 +69,7 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
       : '\nNenhum repositório ativo. Peça ao usuário para selecionar um em Repos.',
     orchestrated
       ? '\nSuas edições vão para uma área de staging compartilhada com os outros agentes. Você NÃO commita: o usuário decide isso no fim.'
-      : autoCommit
-        ? '\nAs edições são commitadas automaticamente em um único commit ao final do turno.'
-        : '\nO commit automático está desligado: avise o usuário que as mudanças ficaram pendentes.',
+      : '\nAs edições ficam em staging virtual. Nenhum commit, branch ou PR acontece sem aprovação humana explícita.',
     overrides.extraSystem ? `\n\n${overrides.extraSystem}` : '',
   ].join('');
 
@@ -109,7 +109,8 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
     }
   }
 
-  // Fecha o staging: um commit por branch tocada.
+  // Fecha o staging: um commit por branch tocada. Este caminho só é usado
+  // por uma ação explícita e continua bloqueado sem aprovação humana.
   async function flushStage(reason) {
     if (!stage || !stage.size) return [];
     // No modo orquestrado nenhum caminho pode commitar por dentro — nem via
@@ -124,6 +125,15 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
       });
       return [];
     }
+    if (typeof onApproval !== 'function') {
+      onEvent?.({
+        type: 'commit_skipped',
+        count: stage.size,
+        files: stage.pending.map(e => e.path),
+        reason: 'aprovação humana indisponível',
+      });
+      return [];
+    }
     const [owner, repoName] = repo.fullName.split('/');
     const groups = stage.byBranch();
     const done = [];
@@ -133,36 +143,43 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
         ? { path: e.path, action: 'delete' }
         : { path: e.path, content: e.content });
 
-      // Portão de branch protegida: nada é escrito sem "ok" do usuário. O
-      // agente não consegue rodar build/teste no browser, então essa é a única
-      // barreira antes de código não verificado entrar em main.
-      if (settings.confirmProtectedCommit !== false
-          && isProtectedBranch(branch, settings.protectedBranches)
-          && typeof onApproval === 'function') {
-        const ok = await onApproval({
-          kind: 'commit',
+      // Toda branch exige aprovação. Branch protegida não tem atalho especial:
+      // o resumo, diff e base SHA ficam visíveis no pedido.
+      const branchData = await gh.getBranch(owner, repoName, branch);
+      const baseSha = branchData.commit.sha;
+      const operationDigest = await stage.operationDigest(entries, { [branch]: baseSha });
+      const ok = await onApproval({
+        kind: 'commit',
+        branch,
+        baseSha,
+        operationDigest,
+        diff: stage.diffPreview(entries),
+        reason,
+        files: entries.map(e => ({ path: e.path, action: e.action, ...diffStats(e) })),
+        summary: describeCommitRequest({ branch, files }),
+      });
+      if (!ok) {
+        onEvent?.({
+          type: 'commit_denied',
           branch,
-          reason,
-          files: entries.map(e => ({ path: e.path, action: e.action })),
-          summary: describeCommitRequest({ branch, files: entries }),
+          count: files.length,
+          files: entries.map(e => e.path),
+          operationDigest,
         });
-        if (!ok) {
-          // Staging preservado: o usuário pode redirecionar para outra branch
-          // ou aprovar depois com "commita agora".
-          onEvent?.({
-            type: 'commit_denied',
-            branch,
-            count: files.length,
-            files: entries.map(e => e.path),
-          });
-          continue;
-        }
+        continue;
       }
 
-      onEvent?.({ type: 'commit_start', branch, count: files.length, reason });
+      onEvent?.({ type: 'commit_start', branch, baseSha, operationDigest, count: files.length, reason });
 
       try {
-        const res = await gh.createCommit(owner, repoName, branch, files, buildCommitMessage(entries));
+        const res = await gh.createCommit(
+          owner,
+          repoName,
+          branch,
+          files,
+          validateCommitMessage(buildCommitMessage(entries)),
+          { expectedBaseSha: baseSha },
+        );
         stage.clear(entries.map(e => e.path));
         stage.commits.push(res);
         // Próxima leitura desta branch precisa ver a árvore nova.
@@ -176,12 +193,12 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
         commits.push(res);
         onEvent?.({
           type: 'commit_done',
-          sha: res.sha, url: res.url, branch, count: files.length,
-          files: entries.map(e => e.path),
+          sha: res.sha, url: res.url, branch, baseSha, operationDigest,
+          count: files.length, files: entries.map(e => e.path),
         });
       } catch (e) {
         // Staging preservado: o usuário pode mandar "tenta commitar de novo".
-        onEvent?.({ type: 'commit_error', branch, error: e.message, count: files.length });
+        onEvent?.({ type: 'commit_error', branch, error: e.message, count: files.length, operationDigest });
         throw e;
       }
     }
@@ -317,24 +334,16 @@ export async function runAgent({ provider, model, agent, userMessage, history, o
     if (i === maxIter - 1) stopReason = 'max_iterations';
   }
 
-  // --- Commit automático do que sobrou no staging.
-  // No modo orquestrado quem decide é o Orchestrator (e o usuário): o agente
-  // individual nunca commita, senão cada um faria um commit parcial.
+  // Staging nunca é commitado no fim do turno. A UI/background deve propor
+  // request de commit em ação explícita do usuário, com digest e base SHA.
   if (stage?.size && !orchestrated) {
-    if (autoCommit && stopReason !== 'error' && stopReason !== 'budget') {
-      try {
-        await flushStage('fim do turno');
-      } catch {
-        // commit_error já foi emitido; não derruba o turno.
-      }
-    } else if (stage.size) {
-      onEvent?.({
-        type: 'commit_skipped',
-        count: stage.size,
-        files: stage.pending.map(e => e.path),
-        reason: autoCommit ? stopReason : 'desligado nas configurações',
-      });
-    }
+    onEvent?.({
+      type: 'commit_ready',
+      count: stage.size,
+      files: stage.summary(),
+      diff: stage.diffPreview(),
+      reason: stopReason,
+    });
   }
 
   // --- Revisão pós-execução: melhorias + segurança sobre o que mudou.

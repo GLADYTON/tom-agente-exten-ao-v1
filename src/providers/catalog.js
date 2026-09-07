@@ -7,7 +7,8 @@ export const PROVIDER_TYPES = [
     endpoint: 'https://gtw.cloud2.dgsis.com.br/v1/chat/completions',
     keyUrl: null,
     authScheme: 'bearer',
-    defaultApiKey: 'sk-b4516085bb758c4e-2exizc-1b9ba3cf',
+    // Chaves devem ser configuradas fora do bundle, por usuário ou gateway seguro.
+    // Não embutir credenciais em extensão distribuída.
     readyToUse: true,
     models: [
       { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', context: 200000, maxOutput: 16000 },

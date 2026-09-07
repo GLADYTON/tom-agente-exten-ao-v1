@@ -18,6 +18,7 @@ import { plan as planTasks } from './planner.js';
 import { Supervisor } from './supervisor.js';
 import * as gh from '../github.js';
 import { getProviders, getActiveModel, getRepo, getSettings } from '../storage.js';
+import { validateCommitMessage } from './guard.js';
 import { resolveModel } from './model.js';
 
 export class Orchestrator {
@@ -201,7 +202,7 @@ export class Orchestrator {
 
   // Commit do staging. Só roda a partir de ação explícita do usuário na UI: o
   // Orchestrator nunca chama isto por conta própria, e sem `confirmed` recusa.
-  async commitStaged({ confirmed = false } = {}) {
+  async commitStaged({ confirmed = false, approvals = {} } = {}) {
     if (!this.stage?.size) return [];
     if (!confirmed) throw new Error('Commit requer confirmação explícita do usuário.');
 
@@ -213,24 +214,37 @@ export class Orchestrator {
       const files = entries.map(e => e.action === 'delete'
         ? { path: e.path, action: 'delete' }
         : { path: e.path, content: e.content });
+      const base = await gh.getBranch(owner, repoName, branch);
+      const baseSha = base.commit.sha;
+      const digest = await this.stage.operationDigest(entries, { [branch]: baseSha });
+      if (approvals[branch]?.operationDigest !== digest || approvals[branch]?.baseSha !== baseSha) {
+        throw new Error(`Aprovação inválida ou staging mudou para ${branch}. Gere nova aprovação.`);
+      }
 
-      this.bus.emit(EV.COMMIT_START, { branch, count: files.length });
+      this.bus.emit(EV.COMMIT_START, { branch, baseSha, operationDigest: digest, count: files.length });
       try {
-        const res = await gh.createCommit(owner, repoName, branch, files, buildCommitMessage(entries));
+        const res = await gh.createCommit(
+          owner,
+          repoName,
+          branch,
+          files,
+          validateCommitMessage(buildCommitMessage(entries)),
+          { expectedBaseSha: baseSha },
+        );
         this.stage.clear(entries.map(e => e.path));
         this.stage.commits.push(res);
         for (const e of entries) {
           if (e.action === 'delete') this.stage.cache.delete(e.path);
-          else this.stage.remember(e.path, { text: e.content, sha: undefined, existed: true });
+          else this.stage.remember(e.path, { text: e.content, sha: undefined, existed: true, branch });
         }
         done.push(res);
         this.bus.emit(EV.COMMIT_DONE, {
-          sha: res.sha, url: res.url, branch,
+          sha: res.sha, url: res.url, branch, baseSha, operationDigest: digest,
           count: files.length, files: entries.map(e => e.path),
         });
       } catch (e) {
         // Staging preservado: o usuário pode tentar de novo.
-        this.bus.emit(EV.COMMIT_ERROR, { branch, error: e.message, count: files.length });
+        this.bus.emit(EV.COMMIT_ERROR, { branch, error: e.message, count: files.length, operationDigest: digest });
         throw e;
       }
     }

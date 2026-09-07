@@ -231,7 +231,7 @@ function openProviderModal({ providers, initialProvider = null, initialType = nu
     ]));
 
     // 3. Chave de API do gateway
-    const defaultKey = existing?.apiKey ?? (typeDef?.defaultApiKey || '');
+    const defaultKey = existing?.apiKey ?? '';
     const keyInp = el('input', {
       class: 'input-field',
       type: 'password',
@@ -577,7 +577,7 @@ function openProviderModal({ providers, initialProvider = null, initialType = nu
     const keyInp = el('input', {
       class: 'input-field',
       type: 'password',
-      value: already?.apiKey || picked.defaultApiKey || '',
+      value: already?.apiKey || '',
       placeholder: picked.noAuth ? '(não necessário)' : 'Cole sua API key aqui',
       disabled: (picked.noAuth || picked.usesGithubToken) ? 'disabled' : null,
     });
