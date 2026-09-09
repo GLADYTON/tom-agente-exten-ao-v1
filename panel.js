@@ -5,13 +5,14 @@ import { renderChatHistory } from './src/views/chat-history.js';
 import { renderConfig } from './src/views/config.js';
 import { renderUsage } from './src/views/usage.js';
 import { renderLicense } from './src/views/license.js';
-import { renderAgentsPanel } from './src/views/agents.js';
+import { renderAgents, renderAgentsPanel } from './src/views/agents.js';
 import { getActiveModel, getProviders, getGithub, getRepo, getActiveAgent } from './src/storage.js';
 import { getLicenseStatus, requireLicense, validateLicense } from './src/license.js';
 import { syncService } from './src/backend/index.js';
 
 const VIEWS = {
   chat: renderChat,
+  agents: renderAgents,
   github: renderGithub,
   repos: renderRepos,
   history: (view) => renderChatHistory(view, () => switchTo('chat')),
@@ -209,6 +210,11 @@ document.getElementById('agents-panel')?.addEventListener('click', (e) => {
 });
 
 window._openAgentsPanel = openAgentsPanel;
+
+statusEl?.addEventListener('click', () => switchTo('config'));
+if (statusEl) statusEl.style.cursor = 'pointer';
+licenseTimerEl?.addEventListener('click', () => switchTo('license'));
+if (licenseTimerEl) licenseTimerEl.style.cursor = 'pointer';
 
 switchTo('chat');
 syncService.subscribe(() => {
