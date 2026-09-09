@@ -263,7 +263,21 @@ export async function renderChat(view) {
   let totalCost = 0, totalTk = 0;
   let assistantNode = null;
   let currentToolGroup = null;
+  let taskStatusNode = null;
   let toolStats = { read: 0, write: 0, err: 0 };
+
+  function setTaskStatus(text, done = false) {
+    if (!taskStatusNode) {
+      taskStatusNode = el('div', { class: 'task-status' });
+      msgsBox.appendChild(taskStatusNode);
+    }
+    taskStatusNode.className = `task-status${done ? ' is-done' : ' is-running'}`;
+    taskStatusNode.replaceChildren(
+      el('span', { class: done ? 'task-status-icon' : 'task-status-spinner' }, done ? '✓' : '⟳'),
+      el('span', {}, text),
+    );
+    msgsBox.scrollTop = msgsBox.scrollHeight;
+  }
 
   function getOrCreateToolGroup() {
     if (currentToolGroup) return currentToolGroup;
