@@ -19,6 +19,44 @@ export const AgentRunner = {
   panelConnectionId: null,
   panelPort: null,
 
+  connectPanel() {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime?.connect) {
+        this.panelPort = chrome.runtime.connect({ name: 'tom-panel' });
+        this.panelConnectionId = `panel_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+        chrome.runtime.sendMessage({
+          type: 'BG_PANEL_CONNECT',
+          connectionId: this.panelConnectionId,
+        }, (res) => {
+          if (res?.connectionId) this.panelConnectionId = res.connectionId;
+        });
+
+        window.addEventListener('beforeunload', () => {
+          try {
+            chrome.runtime.sendMessage({
+              type: 'BG_PANEL_DISCONNECT',
+              connectionId: this.panelConnectionId,
+            });
+          } catch {}
+        });
+      }
+    } catch {}
+  },
+
+  respondApproval(requestId, decision, reqData = {}) {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: 'BG_APPROVAL_RESPONSE',
+        requestId,
+        decision: decision === 'approve' || decision === true ? 'approve' : 'deny',
+        operationDigest: reqData?.operationDigest,
+        sessionId: reqData?.sessionId,
+        panelConnectionId: this.panelConnectionId || reqData?.panelConnectionId,
+      });
+    }
+  },
+
   init() {
     this.connectPanel();
 

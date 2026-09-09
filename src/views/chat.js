@@ -90,7 +90,12 @@ function askApproval(msgsBox, req, resolvePromise) {
     card.querySelector('.approval-actions').replaceChildren(
       el('span', { class: 'field-hint' }, ok ? '✓ aprovado' : '✗ recusado'),
     );
-    resolvePromise(ok);
+    if (typeof resolvePromise === 'function') {
+      resolvePromise(ok);
+    }
+    if (req?.requestId) {
+      AgentRunner.respondApproval(req.requestId, ok ? 'approve' : 'deny', req);
+    }
   }
 
   approveBtn.addEventListener('click', () => settle(true));
